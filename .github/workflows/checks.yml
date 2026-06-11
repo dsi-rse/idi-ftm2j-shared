@@ -89,6 +89,10 @@ jobs:
       - name: Install dependencies
         run: uv sync --group deploy
 
+
+      - name: Upgrade pip to patched version
+        run: uv pip install "pip>=26.1.2"
+
       - name: Dependency vulnerability scan (pip-audit)
         run: |
           uv run pip-audit --desc --ignore-vuln CVE-2026-3219  # Pip vulnerability, no current fix
