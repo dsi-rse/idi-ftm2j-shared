@@ -1,5 +1,5 @@
 # Quality checks: runs on every PR and must pass before merge.
-# Each job is a separate required status check for granular visibility.
+# Each job is a separate status check for granular visibility.
 name: Checks
 
 on:
@@ -88,6 +88,10 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --group deploy
+
+
+      - name: Upgrade pip to patched version
+        run: uv pip install "pip>=26.1.2"
 
       - name: Dependency vulnerability scan (pip-audit)
         run: |
