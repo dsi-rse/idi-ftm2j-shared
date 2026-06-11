@@ -187,8 +187,6 @@ def _load_filing(bucket: str, key: str) -> ScrapedFiling | None:
     if not data:
         return None
     documents = [ScrapedDocument(**d) for d in data.pop("documents", [])]
-    if isinstance(data.get("filing_date"), str):
-        data["filing_date"] = date.fromisoformat(data["filing_date"])
     return ScrapedFiling(**{**data, "documents": documents})
 
 

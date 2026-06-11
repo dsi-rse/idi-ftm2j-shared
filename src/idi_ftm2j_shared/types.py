@@ -35,7 +35,7 @@ class ScrapedFiling:
     cik: str
     accession_number: str
     form_type: str
-    filing_date: date
+    filing_date: str
     last_scraped_at: str
     index_url: str
     company_name: str
