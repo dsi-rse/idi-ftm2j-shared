@@ -7,7 +7,7 @@ packages = ["src/idi_ftm2j_shared"]
 
 [project]
 name = "idi-ftm2j-shared"
-version = "0.1.5a1"
+version = "0.1.5"
 description = "Shared runtime utilities and Pulumi factories for FTM2J processors"
 authors = [
   { name = "UChicago DSI Core Facility", email = "corefacility@uchicago.edu" }
