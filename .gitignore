@@ -241,3 +241,8 @@ pulumi-shared/venv/
 pulumi-shared/__pycache__/
 pulumi-shared/.pulumi/
 pulumi-shared/Pulumi.dev.yaml
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
