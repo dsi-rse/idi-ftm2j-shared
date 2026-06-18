@@ -1,9 +1,17 @@
-# Post-merge pipeline: detect changes, version bump, release, deploy, and publish.
+# Post-merge pipeline: detect changes, version, release, deploy, and publish.
 # Validation (lint, tests, security, pulumi preview) runs in checks.yml before merge.
 #
+# Versioning:
+#   - dev:  alpha version computed for the run only (NOT committed). This keeps dev
+#           from re-triggering itself, so no [skip ci] is needed on dev and the
+#           dev->main PR's checks are never suppressed.
+#   - main: real stable bump committed to main (with [skip ci]), then merged back
+#           into dev so dev reflects the released version.
+#
 # Job DAG:
-#   changes ──┬──► version ──► publish       (only if src/** changed, main only)
-#             └──► deploy-pulumi             (only if pulumi-shared/** changed)
+#   changes ──┬──► version ──┬──► build-dist ──► publish   (src/** changed, main only)
+#             │              └──► sync-dev               (main only: merge main->dev)
+#             └──► deploy-pulumi                          (only if pulumi-shared/** changed)
 #
 # Note: This deploys the shared infrastructure for all FTM2J processor stacks.
 #
@@ -86,51 +94,40 @@ jobs:
       - name: Install dependencies
         run: uv sync --group deploy
 
-      - name: Get current version
-        id: get-version
-        run: |
-          CURRENT=$(uv version --dry-run 2>/dev/null | awk '{print $2}')
-          echo "current_version=$CURRENT" >> $GITHUB_OUTPUT
-
-      - name: Bump alpha version (dev branch)
-        if: github.ref == 'refs/heads/dev'
-        run: |
-          if echo "${{ steps.get-version.outputs.current_version }}" | grep -qE 'a[0-9]'; then
-            uv version --bump alpha
-          else
-            uv version --bump patch --bump alpha
-          fi
-
-      - name: Bump stable version (main branch)
-        if: github.ref == 'refs/heads/main'
-        run: uv version --bump stable
-
-      - name: Set version output
+      - name: Compute version
         id: set-version
         run: |
-          V=$(uv version --dry-run 2>/dev/null | awk '{print $2}')
-          echo "version=$V" >> $GITHUB_OUTPUT
+          if [ "${{ github.ref }}" = "refs/heads/dev" ]; then
+            # Alpha versions exist only for this run — never committed to dev.
+            # Base = next stable (patch bump), computed without writing pyproject.toml.
+            # Append the run number (orderable) and short SHA (traceable). The +SHA
+            # local segment is fine: alphas are never published to PyPI.
+            BASE=$(uv version --bump patch --dry-run --short)
+            VERSION="${BASE}a${GITHUB_RUN_NUMBER}+${GITHUB_SHA::7}"
+          else
+            # main: real stable bump, written to pyproject.toml and committed below.
+            # (--bump stable would be a no-op now that alphas are never committed.)
+            uv version --bump patch
+            VERSION=$(uv version --short)
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
 
-      - name: Configure Git
-        if: "!startsWith(github.ref, 'refs/heads/issue-')"
+      - name: Commit stable version bump (main branch)
+        if: github.ref == 'refs/heads/main'
         run: |
           git config user.name "${GITHUB_ACTOR}"
           git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
-
-      - name: Commit version bump
-        if: "!startsWith(github.ref, 'refs/heads/issue-')"
-        run: |
           git add pyproject.toml uv.lock 2>/dev/null || true
+          # [skip ci] stops this push from re-triggering Deploy on main (infinite loop).
+          # Nothing downstream of main depends on these checks running.
           git diff --staged --quiet || (git commit -m "chore: bump version to ${{ steps.set-version.outputs.version }} [skip ci]" && git push)
 
       - name: Push tag
-        if: "!startsWith(github.ref, 'refs/heads/issue-')"
         run: |
           git tag -a "v${{ steps.set-version.outputs.version }}" -m "Version ${{ steps.set-version.outputs.version }}"
           git push origin "v${{ steps.set-version.outputs.version }}"
 
       - name: Create GitHub Release
-        if: "!startsWith(github.ref, 'refs/heads/issue-')"
         uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd  # v1
         with:
           generateReleaseNotes: true
@@ -141,10 +138,38 @@ jobs:
       - name: Save outputs
         id: output
         run: |
-          V="${{ steps.set-version.outputs.version }}"
-          echo "version=$V" >> $GITHUB_OUTPUT
+          echo "version=${{ steps.set-version.outputs.version }}" >> "$GITHUB_OUTPUT"
           PULUMI_PROJECT=$(grep '^name:' pulumi-shared/Pulumi.yaml | awk '{print $2}')
-          echo "pulumi_project=$PULUMI_PROJECT" >> $GITHUB_OUTPUT
+          echo "pulumi_project=$PULUMI_PROJECT" >> "$GITHUB_OUTPUT"
+
+  sync-dev:
+    name: Sync stable version to dev
+    runs-on: ubuntu-latest
+    needs: [version]
+    # After a prod release, fast-forward dev with the new stable version so dev's
+    # pyproject.toml reflects it. Direct push (no PR) — requires DEPLOY_KEY to have
+    # push access to dev (allow-list it in dev's branch protection).
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+
+      - name: Merge main into dev
+        run: |
+          git config user.name "${GITHUB_ACTOR}"
+          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+          git fetch origin main dev
+          git checkout -B dev origin/dev
+          # [skip ci] stops the merge commit from re-triggering Deploy on dev.
+          git merge --no-ff origin/main \
+            -m "chore: sync stable version ${{ needs.version.outputs.version }} to dev [skip ci]"
+          git push origin dev
 
   deploy-pulumi:
     name: Deploy Pulumi
