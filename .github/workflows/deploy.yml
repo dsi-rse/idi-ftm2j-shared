@@ -165,9 +165,13 @@ jobs:
           git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
           git fetch origin main dev
           git checkout -B dev origin/dev
-          # [skip ci] stops the merge commit from re-triggering Deploy on dev.
-          git merge --no-ff origin/main \
-            -m "chore: sync stable version ${{ needs.version.outputs.version }} to dev [skip ci]"
+          # Prefer a fast-forward: when dev hasn't diverged, it just advances to
+          # main's bump commit (which already carries [skip ci]) — no merge bubble.
+          # Only when new commits landed on dev mid-release do we create a merge
+          # commit, whose [skip ci] then stops it re-triggering Deploy on dev.
+          git merge --ff-only origin/main || \
+            git merge --no-ff origin/main \
+              -m "Merge main into dev (stable v${{ needs.version.outputs.version }}) [skip ci]"
           git push origin dev
 
   deploy-pulumi:
