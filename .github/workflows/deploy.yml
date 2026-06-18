@@ -3,8 +3,7 @@
 #
 # Versioning:
 #   - dev:  alpha version computed for the run only (NOT committed). This keeps dev
-#           from re-triggering itself, so no [skip ci] is needed on dev and the
-#           dev->main PR's checks are never suppressed.
+#           from re-triggering itself.
 #   - main: real stable bump committed to main (with [skip ci]), then merged back
 #           into dev so dev reflects the released version.
 #
