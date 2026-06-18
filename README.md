@@ -121,24 +121,25 @@ Both branches are protected. All changes occur via pull request.
 Validation and deployment are split across two workflows:
 
 - [`checks.yml`](../.github/workflows/checks.yml) — runs on every PR, required before merge. Lint, tests, security scan, Pulumi preview.
-- [`deploy.yml`](../.github/workflows/deploy.yml) — runs on push to `dev` or `main` (i.e. after a merge). Bumps version, tags, releases, deploys Pulumi, publishes to PyPI (`main` only, if the repo includes a package).
+- [`deploy.yml`](../.github/workflows/deploy.yml) — runs on push to `dev` or `main` (i.e. after a merge). Computes/bumps version, tags, releases, deploys Pulumi, publishes to PyPI (`main` only, if the repo includes a package).
 
 ### versioning
 
-Versions live in `pyproject.toml` and are bumped by `deploy.yml` using `uv version`.
+The committed version in `pyproject.toml` is always a **stable** release. Alpha versions are never committed — they are computed inside the `dev` deploy run and used only for that run's tag/release. Only `main` writes a version back to the repo.
 
-| Trigger                          | Bump command                           | Example               |
-| -------------------------------- | -------------------------------------- | --------------------- |
-| Push to `dev`, no existing alpha | `uv version --bump patch --bump alpha` | `1.4.0` → `1.4.1a1`   |
-| Push to `dev`, existing alpha    | `uv version --bump alpha`              | `1.4.1a1` → `1.4.1a2` |
-| Push to `main`                   | `uv version --bump stable`             | `1.4.1a3` → `1.4.1`   |
+| Trigger        | What happens                                                                                    | Example                  |
+| -------------- | ----------------------------------------------------------------------------------------------- | ------------------------ |
+| Push to `dev`  | Alpha computed in-workflow (not committed): next-patch base + run number + short SHA            | `0.1.6a123+abc1234`      |
+| Push to `main` | `uv version --bump patch` bumps the committed stable version, committed with `[skip ci]`        | `0.1.5` → `0.1.6`        |
+
+The alpha base is `uv version --bump patch --dry-run --short` (the next stable target), with `a<run-number>` for ordering and `+<short-sha>` for traceability. The `+<sha>` local segment is fine because alphas are never published to PyPI. Because the committed version is already stable, `main` uses `--bump patch` (not `--bump stable`, which would be a no-op).
 
 Each successful deploy:
 
-1. Commits the bumped `pyproject.toml` + `uv.lock` with `[skip ci]`.
-2. Pushes a `vX.Y.Z[aN]` git tag.
+1. **`main` only:** commits the bumped `pyproject.toml` + `uv.lock` with `[skip ci]` (so the commit doesn't re-trigger `deploy.yml`). `dev` commits nothing.
+2. Pushes a `vX.Y.Z[aN][+sha]` git tag.
 3. Creates a GitHub Release — pre-release on `dev`, stable on `main`.
-4. On `main`: builds the wheel/sdist and publishes to PyPI (if the repo ships a package).
+4. On `main`: builds the wheel/sdist and publishes to PyPI (if the repo ships a package), then the `sync-dev` job merges `main` back into `dev` (see below).
 
 ### development cycle
 
@@ -150,38 +151,43 @@ issue-123-add-feature  ───────────────────
         ▲                                              │
         │ branch                                       │ push triggers deploy.yml
         │                                              ▼
-       dev ◄──────────────────────────────────── 1.4.1a1, 1.4.1a2, ...
+       dev ◄──────────────────────────────────── 0.1.6a123+abc1234, ...
                         merge                    deployed to dev stack
+                                                 (alpha not committed)
 ```
 
 1. `git switch dev && git pull`
 2. `git switch -c issue-123-add-feature`
 3. Commit, push, open PR targeting `dev`. `checks.yml` runs.
 4. Merge the PR (squash recommended). The push to `dev` triggers `deploy.yml`:
-   - Bumps to the next alpha (`1.4.1a1` if no alpha exists yet, otherwise increments the alpha counter).
+   - Computes an alpha version in-workflow (e.g. `0.1.6a123+abc1234`) — **nothing is committed back to `dev`**.
    - Tags, creates a pre-release, deploys the `dev` Pulumi stack, publishes the image. PyPI publish is skipped.
-5. More issue PRs into `dev` keep stacking alphas (`1.4.1a2`, `1.4.1a3`, …) on the same patch line until a stable release cuts that line off.
+5. Each merge into `dev` produces a fresh alpha keyed to its run number and commit SHA. They all target the same next-patch base (e.g. `0.1.6a124+def5678`, `0.1.6a125+...`) until a stable release on `main` advances the base.
 
 #### 2. dev → main → stable release
 
 ```
-dev (1.4.1a3) ───────── PR ─────────► main
+dev (0.1.6a*) ───────── PR ─────────► main
  ▲                                      │ push triggers deploy.yml
  │                                      ▼
-  ◄────────────────────────────────── 1.4.1 (stable)
-                sync/merge            deployed to prod stack
-                                      published to PyPI
+  ◄────────────────────────────────── 0.1.6 (stable)
+              sync-dev job            deployed to prod stack
+              (automatic)             published to PyPI
 ```
 
-1. When `dev` is ready to ship, open a PR from `dev` → `main`. `checks.yml` runs against the `prod` Pulumi stack preview.
-2. Review and merge. **Do not squash** — preserve the alpha history so release notes capture every change. A merge commit is fine.
+1. When `dev` is ready to ship, open a PR from `dev` → `main`. `checks.yml` runs against the `prod` Pulumi stack preview. (Because alphas are no longer committed to `dev`, the PR head is a normal commit and the required checks run — they are not suppressed by a `[skip ci]` version-bump commit.)
+2. Review and merge. **Do not squash** — preserve history so release notes capture every change. A merge commit is fine.
 3. The push to `main` triggers `deploy.yml`:
-   - `uv version --bump stable` drops the `aN` suffix (`1.4.1a3` → `1.4.1`).
-   - Tags `v1.4.1`, creates a stable GitHub Release, deploys the `prod` Pulumi stack, publishes to PyPI (if applicable).
+   - `uv version --bump patch` advances the committed stable version (`0.1.5` → `0.1.6`) and commits it to `main` with `[skip ci]`.
+   - Tags `v0.1.6`, creates a stable GitHub Release, deploys the `prod` Pulumi stack, publishes to PyPI (if applicable).
 
 #### 3. syncing main back into dev
 
-After every stable release (and any hotfix that lands directly on `main`), merge `main` back into `dev` so `dev` stays ahead of `main` and the histories stay aligned.
+This is **automatic**: after a stable release, the `sync-dev` job in `deploy.yml` merges `main` back into `dev` (a direct push with a `[skip ci]` merge commit) so `dev`'s `pyproject.toml` reflects the released stable version. The `[skip ci]` keeps the merge from re-triggering `deploy.yml` on `dev`.
+
+> The `sync-dev` push requires `DEPLOY_KEY` to be allow-listed in `dev`'s branch protection.
+
+If you ever need to sync manually (e.g. a hotfix landed directly on `main`):
 
 ```bash
 git switch main && git pull
@@ -190,9 +196,7 @@ git merge main          # bring in the stable bump commit + any hotfixes
 git push
 ```
 
-The next push to `dev` produces `1.4.2a1` — a new alpha line above the just-released `1.4.1`.
-
-On a `pyproject.toml` conflict, keep `main`'s stable version. The next `dev` deploy bumps from there.
+The next push to `dev` then produces an alpha targeting the following patch (e.g. `0.1.7a*`) above the just-released `0.1.6`. On a `pyproject.toml` conflict, keep `main`'s stable version.
 
 ### manual deploys
 
