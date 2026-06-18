@@ -130,13 +130,15 @@ The committed version in `pyproject.toml` is always a **stable** release. Alpha 
 | Trigger        | What happens                                                                                    | Example                  |
 | -------------- | ----------------------------------------------------------------------------------------------- | ------------------------ |
 | Push to `dev`  | Alpha computed in-workflow (not committed): next-patch base + run number + short SHA            | `0.1.6a123+abc1234`      |
-| Push to `main` | `uv version --bump patch` bumps the committed stable version, committed with `[skip ci]`        | `0.1.5` → `0.1.6`        |
+| Push to `main` | `uv version --bump patch` bumps the committed stable version, committed by the deploy bot | `0.1.5` → `0.1.6`        |
 
 The alpha base is `uv version --bump patch --dry-run --short` (the next stable target), with `a<run-number>` for ordering and `+<short-sha>` for traceability. The `+<sha>` local segment is fine because alphas are never published to PyPI. Because the committed version is already stable, `main` uses `--bump patch` (not `--bump stable`, which would be a no-op).
 
+**Loop prevention.** The bump (`main`) and sync-back (`dev`) commits are committed as `ftm2j-deploy-bot`, and `deploy.yml`'s `version`/`deploy-pulumi` jobs skip whenever the run's head commit was committed by that bot. This breaks the deploy→commit→deploy cycle **without** `[skip ci]` — which is deliberately avoided because it suppresses *all* workflows for the commit (including the required PR checks, silently blocking dev→main PRs) and trips on the literal string appearing anywhere in a message.
+
 Each successful deploy:
 
-1. **`main` only:** commits the bumped `pyproject.toml` + `uv.lock` with `[skip ci]` (so the commit doesn't re-trigger `deploy.yml`). `dev` commits nothing.
+1. **`main` only:** commits the bumped `pyproject.toml` + `uv.lock` (as the deploy bot, so it doesn't re-trigger `deploy.yml`). `dev` commits nothing.
 2. Pushes a `vX.Y.Z[aN][+sha]` git tag.
 3. Creates a GitHub Release — pre-release on `dev`, stable on `main`.
 4. On `main`: builds the wheel/sdist and publishes to PyPI (if the repo ships a package), then the `sync-dev` job merges `main` back into `dev` (see below).
@@ -175,15 +177,15 @@ dev (0.1.6a*) ───────── PR ─────────► main
               (automatic)             published to PyPI
 ```
 
-1. When `dev` is ready to ship, open a PR from `dev` → `main`. `checks.yml` runs against the `prod` Pulumi stack preview. (Because alphas are no longer committed to `dev`, the PR head is a normal commit and the required checks run — they are not suppressed by a `[skip ci]` version-bump commit.)
+1. When `dev` is ready to ship, open a PR from `dev` → `main`. `checks.yml` runs against the `prod` Pulumi stack preview. (Because alphas are no longer committed to `dev`, the PR head is a normal commit and the required checks run.)
 2. Review and merge. **Do not squash** — preserve history so release notes capture every change. A merge commit is fine.
 3. The push to `main` triggers `deploy.yml`:
-   - `uv version --bump patch` advances the committed stable version (`0.1.5` → `0.1.6`) and commits it to `main` with `[skip ci]`.
+   - `uv version --bump patch` advances the committed stable version (`0.1.5` → `0.1.6`) and commits it to `main` as the deploy bot.
    - Tags `v0.1.6`, creates a stable GitHub Release, deploys the `prod` Pulumi stack, publishes to PyPI (if applicable).
 
 #### 3. syncing main back into dev
 
-This is **automatic**: after a stable release, the `sync-dev` job in `deploy.yml` merges `main` back into `dev` (a direct push with a `[skip ci]` merge commit) so `dev`'s `pyproject.toml` reflects the released stable version. The `[skip ci]` keeps the merge from re-triggering `deploy.yml` on `dev`.
+This is **automatic**: after a stable release, the `sync-dev` job in `deploy.yml` merges `main` back into `dev` (a direct push, committed by the deploy bot) so `dev`'s `pyproject.toml` reflects the released stable version. Because the push is from `ftm2j-deploy-bot`, `deploy.yml`'s guards skip it and it doesn't re-trigger Deploy on `dev`.
 
 > The `sync-dev` push requires `DEPLOY_KEY` to be allow-listed in `dev`'s branch protection.
 

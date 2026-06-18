@@ -75,8 +75,11 @@ Prefer `pathlib` over `os.path` (`PTH`), and avoid magic numbers (`PLR2004`).
   releases, deploys Pulumi, publishes to PyPI (`main` only).
 - **Versioning model:** the committed `pyproject.toml` version is always **stable**.
   Alpha versions are computed inside the `dev` deploy run (`<next-patch>a<run>+<sha>`)
-  and are **never committed**. `main` bumps with `uv version --bump patch`, commits
-  with `[skip ci]`, and the `sync-dev` job merges `main` back into `dev`.
+  and are **never committed**. `main` bumps with `uv version --bump patch` and the
+  `sync-dev` job merges `main` back into `dev`. The bump/sync commits are made as
+  `ftm2j-deploy-bot`; Deploy's jobs skip bot-authored head commits to break the
+  deploy→commit→deploy loop (instead of `[skip ci]`, which would also suppress the
+  required PR checks).
 
 See [`README.md`](README.md) (“branching strategy + versioning”) for the full flow,
 diagrams, and the manual-deploy / hotfix paths. **Do not** reintroduce alpha-version

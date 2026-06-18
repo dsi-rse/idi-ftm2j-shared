@@ -4,8 +4,18 @@
 # Versioning:
 #   - dev:  alpha version computed for the run only (NOT committed). This keeps dev
 #           from re-triggering itself.
-#   - main: real stable bump committed to main (with [skip ci]), then merged back
-#           into dev so dev reflects the released version.
+#   - main: real stable bump committed to main, then merged back into dev so dev
+#           reflects the released version.
+#
+# Deploy-loop prevention (why we do NOT use [skip ci]):
+#   The bump commit (main) and the sync-back commit (dev) are committed as
+#   "ftm2j-deploy-bot". The version + deploy-pulumi jobs skip whenever the run's
+#   head commit was committed by that bot, which breaks the deploy->commit->deploy
+#   cycle. We deliberately avoid [skip ci] because it (a) suppresses ALL workflows
+#   for the commit — including the required PR checks in checks.yml, which silently
+#   leaves dev->main PRs BLOCKED — and (b) matches the literal string anywhere in a
+#   commit message, so an accidental mention disables CI. The committer-identity
+#   guard is scoped to this workflow only and is deterministic.
 #
 # Job DAG:
 #   changes ──┬──► version ──┬──► build-dist ──► publish   (src/** changed, main only)
@@ -69,7 +79,12 @@ jobs:
     name: Version, Tag & Release
     runs-on: ubuntu-latest
     needs: [changes]
-    if: needs.changes.outputs.src == 'true'
+    # Skip when this run was triggered by the deploy bot's own bump/sync commit
+    # (loop prevention). 'ftm2j-deploy-bot' must match the git identity set in the
+    # commit/merge steps below. See the header comment for why this isn't [skip ci].
+    if: >
+      needs.changes.outputs.src == 'true'
+      && github.event.head_commit.committer.name != 'ftm2j-deploy-bot'
     permissions:
       contents: write
     defaults:
@@ -114,12 +129,13 @@ jobs:
       - name: Commit stable version bump (main branch)
         if: github.ref == 'refs/heads/main'
         run: |
-          git config user.name "${GITHUB_ACTOR}"
-          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+          # Commit as the deploy bot so the resulting push to main is recognised by
+          # the version/deploy-pulumi `if:` guards and does NOT re-trigger Deploy
+          # (identity-based loop prevention instead of [skip ci]; see header comment).
+          git config user.name "ftm2j-deploy-bot"
+          git config user.email "ftm2j-deploy-bot@users.noreply.github.com"
           git add pyproject.toml uv.lock 2>/dev/null || true
-          # [skip ci] stops this push from re-triggering Deploy on main (infinite loop).
-          # Nothing downstream of main depends on these checks running.
-          git diff --staged --quiet || (git commit -m "chore: bump version to ${{ steps.set-version.outputs.version }} [skip ci]" && git push)
+          git diff --staged --quiet || (git commit -m "chore: bump version to ${{ steps.set-version.outputs.version }}" && git push)
 
       - name: Push tag
         run: |
@@ -161,26 +177,32 @@ jobs:
 
       - name: Merge main into dev
         run: |
-          git config user.name "${GITHUB_ACTOR}"
-          git config user.email "${GITHUB_ACTOR}@users.noreply.github.com"
+          # Commit as the deploy bot so the push to dev is recognised by the
+          # version/deploy-pulumi `if:` guards and does NOT re-trigger Deploy on dev.
+          git config user.name "ftm2j-deploy-bot"
+          git config user.email "ftm2j-deploy-bot@users.noreply.github.com"
           git fetch origin main dev
           git checkout -B dev origin/dev
           # Prefer a fast-forward: when dev hasn't diverged, it just advances to
-          # main's bump commit (which already carries [skip ci]) — no merge bubble.
+          # main's bump commit (already authored by the deploy bot) — no merge bubble.
           # Only when new commits landed on dev mid-release do we create a merge
-          # commit, whose [skip ci] then stops it re-triggering Deploy on dev.
+          # commit; it's committed by the deploy bot too, so the guards still skip it.
           git merge --ff-only origin/main || \
             git merge --no-ff origin/main \
-              -m "Merge main into dev (stable v${{ needs.version.outputs.version }}) [skip ci]"
+              -m "Merge main into dev (stable v${{ needs.version.outputs.version }})"
           git push origin dev
 
   deploy-pulumi:
     name: Deploy Pulumi
     runs-on: ubuntu-latest
     needs: [changes]
+    # The committer check skips the deploy bot's own bump/sync commits (loop
+    # prevention) — needed here too because a sync merge into dev can carry
+    # pulumi-shared changes. See the header comment for why this isn't [skip ci].
     if: >
       (needs.changes.outputs.pulumi == 'true'
-      && (needs.changes.outputs.deploy_env == 'dev' || vars.PROD_INFRA_READY == 'true'))
+      && (needs.changes.outputs.deploy_env == 'dev' || vars.PROD_INFRA_READY == 'true')
+      && github.event.head_commit.committer.name != 'ftm2j-deploy-bot')
       || github.event_name == 'workflow_dispatch'
     permissions:
       id-token: write
