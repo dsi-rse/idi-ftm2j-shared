@@ -114,10 +114,11 @@ jobs:
           if [ "${{ github.ref }}" = "refs/heads/dev" ]; then
             # Alpha versions exist only for this run — never committed to dev.
             # Base = next stable (patch bump), computed without writing pyproject.toml.
-            # Append the run number (orderable) and short SHA (traceable). The +SHA
-            # local segment is fine: alphas are never published to PyPI.
+            # Append the run number (orderable) and short SHA (traceable). Use a '-'
+            # separator (not the PEP 440 '+' local segment) so the version is safe to
+            # reuse downstream as an AWS resource/ECR-image tag.
             BASE=$(uv version --bump patch --dry-run --short)
-            VERSION="${BASE}a${GITHUB_RUN_NUMBER}+${GITHUB_SHA::7}"
+            VERSION="${BASE}a${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
           else
             # main: real stable bump, written to pyproject.toml and committed below.
             # (--bump stable would be a no-op now that alphas are never committed.)
