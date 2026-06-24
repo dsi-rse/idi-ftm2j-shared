@@ -4,7 +4,7 @@ description: AWS ECS infrastructure for IDI Corporate Structure Pipeline
 
 config:
   aws:region:
-    description: AWS region
+    description: AWS region to deploy to
     value: us-east-2
 
   idi:app_name:
