@@ -2,9 +2,11 @@
 
 from importlib.metadata import version
 
-__version__ = version("idi-ftm2j-shared")
+PACKAGE_NAME = "idi-ftm2j-shared"
 
-__all__ = ["__version__", "get_version"]
+__version__ = version(PACKAGE_NAME)
+
+__all__ = ["PACKAGE_NAME", "__version__", "get_version"]
 
 
 def get_version() -> str:
