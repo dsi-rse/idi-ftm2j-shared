@@ -19,9 +19,7 @@ EC2_METADATA_BASE = "http://169.254.169.254"
 EC2_METADATA_TOKEN_URL = f"{EC2_METADATA_BASE}/latest/api/token"
 EC2_METADATA_INSTANCE_ID_URL = f"{EC2_METADATA_BASE}/latest/meta-data/instance-id"
 
-LOG_RETENTION_DAYS = (
-    30  # Possible values are: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, 400, ...
-)
+LOG_RETENTION_DAYS = 30  # Possible values are: 1, 3, 5, 7, 14, 30, 60, 90, 120, 150, 180, 365, ...
 
 
 def _get_instance_id() -> str:
