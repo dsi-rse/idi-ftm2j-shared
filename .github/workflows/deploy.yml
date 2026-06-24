@@ -108,6 +108,14 @@ jobs:
       - name: Install dependencies
         run: uv sync --group deploy
 
+      - name: Configure Git identity
+        run: |
+          # Used for the version-bump commit (main) and the annotated tag (both
+          # branches). Committing as the deploy bot is also what the loop-prevention
+          # guards key on — see the header comment.
+          git config user.name "ftm2j-deploy-bot"
+          git config user.email "ftm2j-deploy-bot@users.noreply.github.com"
+
       - name: Compute version
         id: set-version
         run: |
@@ -130,11 +138,6 @@ jobs:
       - name: Commit stable version bump (main branch)
         if: github.ref == 'refs/heads/main'
         run: |
-          # Commit as the deploy bot so the resulting push to main is recognised by
-          # the version/deploy-pulumi `if:` guards and does NOT re-trigger Deploy
-          # (identity-based loop prevention instead of [skip ci]; see header comment).
-          git config user.name "ftm2j-deploy-bot"
-          git config user.email "ftm2j-deploy-bot@users.noreply.github.com"
           git add pyproject.toml uv.lock 2>/dev/null || true
           git diff --staged --quiet || (git commit -m "chore: bump version to ${{ steps.set-version.outputs.version }}" && git push)
 
