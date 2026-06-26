@@ -12,3 +12,4 @@
 config:
   idi:bucket_name: processor-storage
   idi:dlq_retention_days: "14"
+encryptionsalt: v1:mESPxCYAD5Q=:v1:ylAhv7eUqFiqxUtJ:YS5tBR/Sr0f+9Ze/Gt1GMuDOQPnoxg==
