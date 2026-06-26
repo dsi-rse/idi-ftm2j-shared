@@ -210,9 +210,15 @@ gh variable set PROD_INFRA_READY --repo "$REPO" --body "true"
 
 ## `.18`–`.20` — sibling caller files (for reference)
 
-Each sibling's `deploy.yml` and `checks.yml` become thin callers pinned to
-`@ci-v1`. Correct values (note `cov-package` is the **importable** package with
-the `idi_` prefix — the old hyphenated `APP_NAME` measured zero coverage):
+Each sibling's `deploy.yml` and `checks.yml` become thin callers pinned to an
+**exact released version** of this repo, e.g. `@v0.1.9`. The shared workflows are
+versioned like any other code: every change to `.github/**` cuts a new immutable
+`vX.Y.Z` tag, and a consumer's behavior never changes until it bumps its pin.
+Pick the latest `vX.Y.Z` tag of `idi-ftm2j-shared` (`gh release list -R
+dsi-clinic/idi-ftm2j-shared`) and pin it; upgrade later by editing the pin.
+
+Correct values (note `cov-package` is the **importable** package with the `idi_`
+prefix — the old hyphenated `APP_NAME` measured zero coverage):
 
 | Repo | `app-name` | `images` (name / dockerfile) | `cov-package` |
 |---|---|---|---|
@@ -234,7 +240,7 @@ concurrency:
 permissions: {}
 jobs:
   pipeline:
-    uses: dsi-clinic/idi-ftm2j-shared/.github/workflows/pipeline-docker.yml@ci-v1
+    uses: dsi-clinic/idi-ftm2j-shared/.github/workflows/pipeline-docker.yml@v0.1.9  # pin an exact release
     secrets: inherit
     with:
       app-name: corporate-structure
@@ -254,7 +260,7 @@ concurrency:
   cancel-in-progress: false
 jobs:
   checks:
-    uses: dsi-clinic/idi-ftm2j-shared/.github/workflows/pipeline-checks.yml@ci-v1
+    uses: dsi-clinic/idi-ftm2j-shared/.github/workflows/pipeline-checks.yml@v0.1.9  # pin an exact release
     secrets: inherit
     with:
       app-name: corporate-structure
@@ -269,8 +275,10 @@ condition.
 
 ## Bootstrap & sequencing
 
-1. Land the shared workflows on `main` → `release-ci.yml` creates the `ci-v1` tag.
-   **This must happen before** anything resolves `@ci-v1`.
+1. Land the shared workflows on `main` → `_version.yml` cuts the first `vX.Y.Z`
+   tag (a `.github/**` change now bumps the version without publishing to PyPI).
+   That tag is what siblings pin. The host's own `deploy.yml`/`checks.yml` use
+   local `./` refs and inlined `uv` setup, so they need **no** tag to run.
 2. Set org vars/secrets (`.17`).
 3. Per repo: create dev/prod environments, env-scoped role ARNs, `DEPLOY_KEY`,
    `PROD_INFRA_READY=false`; confirm `dev` allows the deploy-key push.
