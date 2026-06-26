@@ -82,7 +82,9 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Install dependencies
-        run: uv sync --group deploy
+        # `uv version` only needs the project metadata, not a specific group.
+        # Bare sync avoids assuming a `deploy` group that siblings don't define.
+        run: uv sync
 
       - name: Configure Git identity
         run: |

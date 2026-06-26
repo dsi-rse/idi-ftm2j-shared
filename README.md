@@ -12,6 +12,7 @@ Provisions the account-level OIDC identity provider and the two IAM roles that a
 
 ```bash
 cd pulumi-bootstrap
+pulumi login s3://idi-ftm2j-dev-pulumi-state/ftm2j-shared/bootstrap # Config passphrase in Bitwarden
 pulumi stack select dev
 pulumi preview
 pulumi up

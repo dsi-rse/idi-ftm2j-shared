@@ -15,7 +15,7 @@ Stack outputs:
 
 # Import order matters: config first, then resources by dependency
 import pulumi
-from infra import network, queue, storage
+from infra import network, params, queue, storage
 
 # -----------------------------------------------------------------------------
 # Exports
@@ -32,3 +32,7 @@ pulumi.export("s3_endpoint_arn", network.s3_endpoint.arn)
 # Queue
 pulumi.export("dlq_url", queue.dlq.url)
 pulumi.export("dlq_arn", queue.dlq.arn)
+
+# SSM cross-stack parameters (read by processors)
+pulumi.export("ssm_processor_bucket_name_param", params.processor_bucket_name_param.name)
+pulumi.export("ssm_dlq_name_param", params.dlq_name_param.name)
