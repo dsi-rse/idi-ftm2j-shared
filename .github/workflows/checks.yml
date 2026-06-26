@@ -18,6 +18,13 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+# Granted explicitly (not relying on the repo's default token scope) so the
+# nested check jobs can request their subsets.
+permissions:
+  contents: read            # checkout
+  id-token: write           # OIDC for the pulumi preview role
+  security-events: write    # CodeQL upload in the security job
+
 jobs:
   checks:
     uses: ./.github/workflows/pipeline-checks.yml

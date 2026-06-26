@@ -237,7 +237,10 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
-permissions: {}
+permissions:           # caller must grant the union the nested jobs request
+  contents: write      # version bump, tag/release, sync-dev
+  id-token: write      # OIDC for AWS (pulumi deploy + ECR)
+  packages: write      # push images to GHCR
 jobs:
   pipeline:
     uses: dsi-clinic/idi-ftm2j-shared/.github/workflows/pipeline-docker.yml@v0.1.9  # pin an exact release
@@ -258,6 +261,10 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
+permissions:
+  contents: read
+  id-token: write          # OIDC for the pulumi preview role
+  security-events: write   # CodeQL upload
 jobs:
   checks:
     uses: dsi-clinic/idi-ftm2j-shared/.github/workflows/pipeline-checks.yml@v0.1.9  # pin an exact release
