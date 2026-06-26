@@ -23,7 +23,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
-permissions: {}
+# Granted at the caller so the nested reusable jobs can request their subsets —
+# a called workflow can never exceed the caller's permissions, and `{}` (all
+# none) makes even _changes' `contents: read` invalid.
+permissions:
+  contents: write   # version bump commit, tag + GitHub release, sync-dev
+  id-token: write   # OIDC: AWS (pulumi deploy) + PyPI trusted publishing
 
 jobs:
   pipeline:
