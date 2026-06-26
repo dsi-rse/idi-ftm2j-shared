@@ -39,9 +39,9 @@ on:
         type: string
         default: "3.13"
     secrets:
+      # AWS_ROLE_ARN_DEPLOY is environment-scoped — not declared here; the
+      # deploy-pulumi and sync-ecr jobs resolve it via their `environment:`.
       DEPLOY_KEY:
-        required: true
-      AWS_ROLE_ARN_DEPLOY:
         required: true
       PULUMI_CONFIG_PASSPHRASE:
         required: true

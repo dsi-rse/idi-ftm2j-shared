@@ -35,9 +35,8 @@ on:
       image-prefix:
         type: string
         default: "idi"
-    secrets:
-      AWS_ROLE_ARN_DEPLOY:
-        required: true
+    # No workflow_call secrets to declare: AWS_ROLE_ARN_DEPLOY is environment-
+    # scoped and resolved by the job's `environment:`, not passed by the caller.
 
 jobs:
   sync-ecr:

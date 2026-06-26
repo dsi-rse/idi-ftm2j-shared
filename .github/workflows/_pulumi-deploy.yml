@@ -40,9 +40,9 @@ on:
         type: string
         default: "3.13"
     secrets:
-      AWS_ROLE_ARN_DEPLOY:
-        description: Environment-scoped deploy role ARN (dev role != prod role).
-        required: true
+      # AWS_ROLE_ARN_DEPLOY is environment-scoped and resolved by this job's
+      # `environment:` — it must NOT be declared as a workflow_call secret, since
+      # `secrets: inherit` cannot pass environment secrets.
       PULUMI_CONFIG_PASSPHRASE:
         description: Passphrase that decrypts Pulumi state. Single canonical name.
         required: true

@@ -34,9 +34,11 @@ on:
         type: string
         default: "--all-extras --all-groups"
     secrets:
-      AWS_ROLE_ARN_CHECKS:
-        description: Environment-scoped lower-privilege role for pulumi preview.
-        required: true
+      # AWS_ROLE_ARN_CHECKS is environment-scoped — intentionally NOT declared
+      # here. The pulumi-preview job resolves it via its `environment:`. Declaring
+      # an env secret as a required workflow_call secret makes every job that has
+      # no `environment:` (lint/test/security) fail at the call boundary, because
+      # `secrets: inherit` cannot satisfy environment secrets.
       PULUMI_CONFIG_PASSPHRASE:
         required: true
 
