@@ -1,0 +1,14 @@
+# Committed non-secret config for the dev stack (issue #25, config-as-code).
+#
+# These were previously injected by the deploy workflow from the BUCKET_NAME /
+# DLQ_RETENTION_DAYS GitHub secrets; they are not secret, so they live here for a
+# git audit trail and `git revert` rollback. `idi:app_name` is intentionally NOT
+# committed — the workflow sets it from the caller input.
+#
+# Note: the final bucket name is "{project}-{stack}-{app_name}-{bucket_name}"
+# (see infra/config.py), so the stack already differentiates dev/prod — this
+# value can match prod. Keep it equal to the prior BUCKET_NAME secret value to
+# avoid renaming (and thus recreating) the bucket.
+config:
+  idi:bucket_name: processor-storage
+  idi:dlq_retention_days: "14"
