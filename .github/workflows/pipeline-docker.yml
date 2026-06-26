@@ -3,15 +3,20 @@
 #   changes ─► version ─┬─► docker ─► deploy-pulumi ─► sync-ecr
 #                       └─► sync-dev                 (main only: merge main->dev)
 #
+# SELF-CONTAINED ON PURPOSE: every job is inline (no `uses: ./...` nested
+# reusables). A reusable workflow's relative `./` refs resolve against the
+# *calling* repo, so a sibling calling this cross-repo can't find them — the
+# whole graph must live in this one file. (pipeline-checks is inline for the
+# same reason.)
+#
 # Each sibling's thin `deploy.yml` calls this with `secrets: inherit`, passing
 # only `app-name` and `images`. Loop prevention: the `version` job is guarded on
-# the committer identity, so the whole chain skips on the deploy bot's own
-# bump/sync commits. The literal 'idi-deploy-bot' MUST match the identity in
-# _version.yml / _sync-dev.yml.
+# the committer identity (literal `idi-deploy-bot`), so the chain skips on the
+# deploy bot's own bump/sync commits.
 #
 # Prod is gated on PROD_INFRA_READY: a main push still versions, releases, and
-# pushes the image to GHCR, but deploy-pulumi (and therefore the ECR sync) is
-# skipped until the processor flips its var to 'true'.
+# pushes the image to GHCR, but deploy-pulumi (and the ECR sync) is skipped until
+# the processor flips its var to 'true'.
 name: pipeline-docker
 
 on:
@@ -38,6 +43,15 @@ on:
       python-version:
         type: string
         default: "3.13"
+      registry:
+        type: string
+        default: "ghcr.io"
+      bot-name:
+        type: string
+        default: "idi-deploy-bot"
+      bot-email:
+        type: string
+        default: "idi-deploy-bot@users.noreply.github.com"
     secrets:
       # AWS_ROLE_ARN_DEPLOY is environment-scoped — not declared here; the
       # deploy-pulumi and sync-ecr jobs resolve it via their `environment:`.
@@ -48,60 +62,255 @@ on:
 
 jobs:
   changes:
-    uses: ./.github/workflows/_changes.yml
+    name: Detect changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      deploy: ${{ steps.aggregate.outputs.deploy }}
+      deploy_env: ${{ steps.env.outputs.deploy_env }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          base: ${{ github.event.before }}
+          filters: |
+            src:
+              - 'src/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+            pulumi:
+              - 'pulumi/**'
+            docker:
+              - 'dockerfiles/**'
+              - 'src/**'
+              - 'pyproject.toml'
+              - 'uv.lock'
+      - name: Aggregate deploy signal
+        id: aggregate
+        run: |
+          if [ "${{ steps.filter.outputs.src }}" = "true" ] \
+            || [ "${{ steps.filter.outputs.pulumi }}" = "true" ] \
+            || [ "${{ steps.filter.outputs.docker }}" = "true" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Resolve deploy environment
+        id: env
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "deploy_env=prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy_env=dev" >> "$GITHUB_OUTPUT"
+          fi
 
   version:
+    name: Version, tag & release
     needs: changes
     if: >
       needs.changes.outputs.deploy == 'true'
-      && github.event.head_commit.committer.name != 'idi-deploy-bot'
-    uses: ./.github/workflows/_version.yml
-    with:
-      project-dir: ${{ inputs.project-dir }}
-      python-version: ${{ inputs.python-version }}
-      pulumi-project-file: ${{ inputs.pulumi-dir }}/Pulumi.yaml
-    secrets: inherit
+      && github.event.head_commit.committer.name != inputs.bot-name
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-dir }}
+    outputs:
+      version: ${{ steps.set-version.outputs.version }}
+      pulumi_project: ${{ steps.output.outputs.pulumi_project }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
+        with:
+          version: "0.11.8"
+          python-version: ${{ inputs.python-version }}
+      - name: Install dependencies
+        run: uv sync
+      - name: Configure Git identity
+        run: |
+          git config user.name "${{ inputs.bot-name }}"
+          git config user.email "${{ inputs.bot-email }}"
+      - name: Compute version
+        id: set-version
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            uv version --bump patch
+            VERSION=$(uv version --short)
+          else
+            BASE=$(uv version --bump patch --dry-run --short)
+            VERSION="${BASE}a${GITHUB_RUN_NUMBER}-${GITHUB_SHA::7}"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Commit version bump (main only)
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git add pyproject.toml uv.lock 2>/dev/null || true
+          git diff --staged --quiet || \
+            (git commit -m "chore: bump version to ${{ steps.set-version.outputs.version }}" && git push)
+      - name: Push tag
+        run: |
+          git tag -a "v${{ steps.set-version.outputs.version }}" -m "Version ${{ steps.set-version.outputs.version }}"
+          git push origin "v${{ steps.set-version.outputs.version }}"
+      - name: Create GitHub Release
+        uses: ncipollo/release-action@339a81892b84b4eeb0f6e744e4574d79d0d9b8dd  # v1
+        with:
+          generateReleaseNotes: true
+          name: v${{ steps.set-version.outputs.version }}
+          tag: v${{ steps.set-version.outputs.version }}
+          prerelease: ${{ github.ref != 'refs/heads/main' }}
+      - name: Save outputs
+        id: output
+        run: |
+          PULUMI_PROJECT=$(grep '^name:' "${{ inputs.pulumi-dir }}/Pulumi.yaml" | awk '{print $2}')
+          echo "pulumi_project=$PULUMI_PROJECT" >> "$GITHUB_OUTPUT"
 
   docker:
+    name: Build & push ${{ matrix.image.name }} to GHCR
     needs: version
-    uses: ./.github/workflows/_docker-build.yml
-    with:
-      app-name: ${{ inputs.app-name }}
-      version: ${{ needs.version.outputs.version }}
-      images: ${{ inputs.images }}
-      project-dir: ${{ inputs.project-dir }}
-      image-prefix: ${{ inputs.image-prefix }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        image: ${{ fromJSON(inputs.images) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ inputs.registry }}/${{ github.repository_owner }}/${{ inputs.image-prefix }}-${{ inputs.app-name }}-${{ matrix.image.name }}
+          tags: |
+            type=raw,value=${{ needs.version.outputs.version }}
+            type=raw,value=latest
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ inputs.project-dir }}
+          file: ${{ matrix.image.dockerfile }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
 
   sync-dev:
+    name: Sync stable version to dev
     needs: version
     if: github.ref == 'refs/heads/main'
-    uses: ./.github/workflows/_sync-dev.yml
-    with:
-      version: ${{ needs.version.outputs.version }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+      - name: Merge main into dev
+        run: |
+          git config user.name "${{ inputs.bot-name }}"
+          git config user.email "${{ inputs.bot-email }}"
+          git fetch origin main dev
+          git checkout -B dev origin/dev
+          git merge --ff-only origin/main || \
+            git merge --no-ff origin/main \
+              -m "Merge main into dev (stable v${{ needs.version.outputs.version }})"
+          git push origin dev
 
   deploy-pulumi:
+    name: Deploy Pulumi (${{ needs.changes.outputs.deploy_env }})
     needs: [changes, version, docker]
     # Always on dev; on prod only once the processor marks its infra ready.
     if: needs.changes.outputs.deploy_env != 'prod' || vars.PROD_INFRA_READY == 'true'
-    uses: ./.github/workflows/_pulumi-deploy.yml
-    with:
-      app-name: ${{ inputs.app-name }}
-      deploy-env: ${{ needs.changes.outputs.deploy_env }}
-      project-dir: ${{ inputs.project-dir }}
-      pulumi-dir: ${{ inputs.pulumi-dir }}
-      python-version: ${{ inputs.python-version }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    environment: ${{ needs.changes.outputs.deploy_env }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
+        with:
+          version: "0.11.8"
+          python-version: ${{ inputs.python-version }}
+      - name: Install dependencies
+        run: uv sync --group pulumi
+        working-directory: ${{ inputs.project-dir }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEPLOY }}
+          role-session-name: idi-github-ci
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Configure Pulumi
+        working-directory: ${{ inputs.project-dir }}/${{ inputs.pulumi-dir }}
+        run: |
+          pulumi login s3://${{ vars.PULUMI_STATE_BUCKET }}
+          pulumi stack select ${{ needs.changes.outputs.deploy_env }} 2>/dev/null || pulumi stack init ${{ needs.changes.outputs.deploy_env }}
+          pulumi config set aws:region ${{ env.AWS_REGION }}
+          pulumi config set idi:app_name ${{ inputs.app-name }}
+      - name: Pulumi deploy
+        working-directory: ${{ inputs.project-dir }}/${{ inputs.pulumi-dir }}
+        run: uv run pulumi up --yes
 
   sync-ecr:
+    name: Sync ${{ matrix.image.name }} to ECR (${{ needs.changes.outputs.deploy_env }})
     needs: [changes, version, docker, deploy-pulumi]
-    uses: ./.github/workflows/_sync-ecr.yml
-    with:
-      app-name: ${{ inputs.app-name }}
-      version: ${{ needs.version.outputs.version }}
-      deploy-env: ${{ needs.changes.outputs.deploy_env }}
-      pulumi-project: ${{ needs.version.outputs.pulumi_project }}
-      images: ${{ inputs.images }}
-      image-prefix: ${{ inputs.image-prefix }}
-    secrets: inherit
+    runs-on: ubuntu-latest
+    environment: ${{ needs.changes.outputs.deploy_env }}
+    permissions:
+      id-token: write
+      contents: read
+      packages: read
+    strategy:
+      matrix:
+        image: ${{ fromJSON(inputs.images) }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEPLOY }}
+          role-session-name: idi-github-ci
+          aws-region: ${{ vars.AWS_REGION || 'us-east-2' }}
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Re-tag and push to ECR
+        env:
+          ECR_PREFIX: ${{ vars.ECR_REPOSITORY_PREFIX || format('{0}-{1}', needs.version.outputs.pulumi_project, needs.changes.outputs.deploy_env) }}
+        run: |
+          ECR_REPO="${ECR_PREFIX}-${{ inputs.app-name }}-${{ matrix.image.name }}"
+          ECR_URI="${{ steps.ecr-login.outputs.registry }}/$ECR_REPO"
+          GHCR_IMG="${{ inputs.registry }}/${{ github.repository_owner }}/${{ inputs.image-prefix }}-${{ inputs.app-name }}-${{ matrix.image.name }}"
+          docker pull "${GHCR_IMG}:${{ needs.version.outputs.version }}"
+          docker tag "${GHCR_IMG}:${{ needs.version.outputs.version }}" "${ECR_URI}:${{ needs.version.outputs.version }}"
+          docker tag "${GHCR_IMG}:${{ needs.version.outputs.version }}" "${ECR_URI}:latest"
+          docker push "${ECR_URI}:${{ needs.version.outputs.version }}"
+          docker push "${ECR_URI}:latest"
