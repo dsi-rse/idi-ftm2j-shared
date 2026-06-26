@@ -1,0 +1,163 @@
+# Composition: PR quality gate — lint, test, security, pulumi preview.
+#
+# Every repo's thin `checks.yml` calls this with `secrets: inherit`. The PR
+# trigger set (and dropping `issue-*`) lives in that thin caller, not here.
+#
+# Standardizations folded in:
+#   - cov-package input fixes a REAL coverage bug: corporate-structure and
+#     sec-scraper ran `--cov=<APP_NAME>` with a hyphenated name that is not the
+#     importable package, so coverage silently measured nothing. Callers now pass
+#     the underscore package name(s). Accepts a space-separated list for repos
+#     (like this one) that cover more than one package.
+#   - One `security` job: every repo upgrades pip to the patched version and runs
+#     pip-audit with the same ignore (sec-scraper previously omitted both).
+#
+# pulumi-preview uses the lower-privilege AWS_ROLE_ARN_CHECKS and previews the
+# prod stack only when the PR targets main and prod is marked ready; otherwise
+# dev. The env-scoped role resolves because the job sets `environment:`.
+name: pipeline-checks
+
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        description: Value for `idi:app_name` in the pulumi preview.
+        type: string
+        required: true
+      cov-package:
+        description: Importable package name(s) for `--cov` (space-separated for multiple).
+        type: string
+        required: true
+      project-dir:
+        type: string
+        default: "."
+      pulumi-dir:
+        description: Pulumi program directory (relative to project-dir).
+        type: string
+        default: "pulumi"
+      python-version:
+        type: string
+        default: "3.13"
+      sync-args:
+        description: Args for `uv sync` in the lint/test/security jobs.
+        type: string
+        default: "--all-extras --all-groups"
+    secrets:
+      AWS_ROLE_ARN_CHECKS:
+        description: Environment-scoped lower-privilege role for pulumi preview.
+        required: true
+      PULUMI_CONFIG_PASSPHRASE:
+        required: true
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-dir }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python + uv
+        uses: dsi-clinic/idi-ftm2j-shared/.github/actions/setup-python-uv@ci-v1
+        with:
+          python-version: ${{ inputs.python-version }}
+          sync-args: ${{ inputs.sync-args }}
+          working-directory: ${{ inputs.project-dir }}
+      - name: Lint (ruff)
+        run: uv run ruff check . --output-format=concise
+      - name: Format check (ruff)
+        run: uv run ruff format --check .
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-dir }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python + uv
+        uses: dsi-clinic/idi-ftm2j-shared/.github/actions/setup-python-uv@ci-v1
+        with:
+          python-version: ${{ inputs.python-version }}
+          sync-args: ${{ inputs.sync-args }}
+          working-directory: ${{ inputs.project-dir }}
+      - name: Run tests with coverage
+        run: |
+          COV_ARGS=""
+          for pkg in ${{ inputs.cov-package }}; do
+            COV_ARGS="$COV_ARGS --cov=$pkg"
+          done
+          uv run pytest $COV_ARGS --cov-report=xml:coverage.xml --cov-report=term -v
+
+  security:
+    name: Security
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+    defaults:
+      run:
+        working-directory: ${{ inputs.project-dir }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python + uv
+        uses: dsi-clinic/idi-ftm2j-shared/.github/actions/setup-python-uv@ci-v1
+        with:
+          python-version: ${{ inputs.python-version }}
+          sync-args: ${{ inputs.sync-args }}
+          working-directory: ${{ inputs.project-dir }}
+      - name: Upgrade pip to patched version
+        run: uv pip install "pip>=26.1.2"
+      - name: Dependency vulnerability scan (pip-audit)
+        run: uv run --with pip-audit pip-audit --desc --ignore-vuln CVE-2026-3219  # Pip vulnerability, no current fix
+      - name: CodeQL Analysis Init
+        uses: github/codeql-action/init@v4
+        with:
+          languages: python
+      - name: CodeQL Analysis Analyze
+        uses: github/codeql-action/analyze@v4
+
+  pulumi-preview:
+    name: Pulumi Preview
+    runs-on: ubuntu-latest
+    # Preview the prod stack only when the PR targets main and prod is ready.
+    # Setting `environment:` is what makes AWS_ROLE_ARN_CHECKS (env-scoped) resolve.
+    environment: ${{ (github.base_ref == 'main' && vars.PROD_INFRA_READY == 'true') && 'prod' || 'dev' }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup Python + uv
+        uses: dsi-clinic/idi-ftm2j-shared/.github/actions/setup-python-uv@ci-v1
+        with:
+          python-version: ${{ inputs.python-version }}
+          sync-args: "--group pulumi --group deploy"
+          working-directory: ${{ inputs.project-dir }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_CHECKS }}
+          role-session-name: idi-github-ci
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Resolve stack
+        id: stack
+        run: |
+          if [ "${{ github.base_ref }}" = "main" ] && [ "${{ vars.PROD_INFRA_READY }}" = "true" ]; then
+            echo "name=prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "name=dev" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Pulumi preview (${{ steps.stack.outputs.name }} stack)
+        working-directory: ${{ inputs.project-dir }}/${{ inputs.pulumi-dir }}
+        run: |
+          pulumi login s3://${{ vars.PULUMI_STATE_BUCKET }}
+          pulumi stack select ${{ steps.stack.outputs.name }} 2>/dev/null || pulumi stack init ${{ steps.stack.outputs.name }}
+          pulumi config set aws:region ${{ env.AWS_REGION }}
+          pulumi config set idi:app_name ${{ inputs.app-name }}
+          uv run pulumi preview --non-interactive

@@ -1,0 +1,96 @@
+# Composition: post-merge pipeline for the PyPI package (this repo only).
+#
+#   changes ─► version ─┬─► build-publish   (src changed, main only)
+#           │           └─► sync-dev        (main only: merge main->dev)
+#           └─► deploy-pulumi               (pulumi-shared changed; independent of version)
+#
+# Defaults are tuned for this host repo (app-name, pulumi-shared dir, PyPI URL),
+# so the thin caller can invoke it with no `with:` block. Loop prevention and the
+# prod gate mirror pipeline-docker. PyPI publish happens on main only; dev still
+# tags + cuts a prerelease but does not publish.
+name: pipeline-pypi
+
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        type: string
+        default: "ftm2j-shared"
+      project-dir:
+        type: string
+        default: "."
+      pulumi-dir:
+        type: string
+        default: "pulumi-shared"
+      python-version:
+        type: string
+        default: "3.13"
+      project-url:
+        description: PyPI project URL shown on the release environment.
+        type: string
+        default: "https://pypi.org/project/idi-ftm2j-shared/"
+    secrets:
+      DEPLOY_KEY:
+        required: true
+      AWS_ROLE_ARN_DEPLOY:
+        required: true
+      PULUMI_CONFIG_PASSPHRASE:
+        required: true
+
+jobs:
+  changes:
+    uses: ./.github/workflows/_changes.yml
+    with:
+      filters: |
+        src:
+          - 'src/**'
+          - 'pyproject.toml'
+          - 'uv.lock'
+        pulumi:
+          - 'pulumi-shared/**'
+
+  version:
+    needs: changes
+    if: >
+      needs.changes.outputs.src == 'true'
+      && github.event.head_commit.committer.name != 'idi-deploy-bot'
+    uses: ./.github/workflows/_version.yml
+    with:
+      project-dir: ${{ inputs.project-dir }}
+      python-version: ${{ inputs.python-version }}
+      pulumi-project-file: ${{ inputs.pulumi-dir }}/Pulumi.yaml
+    secrets: inherit
+
+  build-publish:
+    needs: version
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/_build-publish-pypi.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+      python-version: ${{ inputs.python-version }}
+      project-url: ${{ inputs.project-url }}
+    secrets: inherit
+
+  sync-dev:
+    needs: version
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/_sync-dev.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+    secrets: inherit
+
+  deploy-pulumi:
+    needs: changes
+    # Independent of the version bump (infra can change without a release).
+    if: >
+      needs.changes.outputs.pulumi == 'true'
+      && (needs.changes.outputs.deploy_env != 'prod' || vars.PROD_INFRA_READY == 'true')
+      && github.event.head_commit.committer.name != 'idi-deploy-bot'
+    uses: ./.github/workflows/_pulumi-deploy.yml
+    with:
+      app-name: ${{ inputs.app-name }}
+      deploy-env: ${{ needs.changes.outputs.deploy_env }}
+      project-dir: ${{ inputs.project-dir }}
+      pulumi-dir: ${{ inputs.pulumi-dir }}
+      python-version: ${{ inputs.python-version }}
+    secrets: inherit
