@@ -1,5 +1,9 @@
-# Quality checks: runs on every PR and must pass before merge.
-# Each job is a separate status check for granular visibility.
+# PR quality gate for this repo. Thin caller of the shared pipeline-checks.yml
+# composition (lint, test, security, pulumi preview), referenced locally (./).
+#
+# One standardized trigger set: PRs targeting main or dev. The old
+# release/release**/issue-* targets are dropped — issue branches still get checks
+# because their PRs target dev (the trigger keys on the base branch, not source).
 name: Checks
 
 on:
@@ -7,9 +11,6 @@ on:
     branches:
       - main
       - dev
-      - release
-      - 'release/**'
-      - 'issue-*'
     paths-ignore:
       - '**.md'
       - 'docs/**'
@@ -19,135 +20,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
-env:
-  PROJECT_DIR: .
-
 jobs:
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ${{ env.PROJECT_DIR }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "0.11.8"
-          python-version: "3.13"
-
-      - name: Install dependencies
-        run: uv sync --group deploy
-
-      - name: Lint (ruff)
-        run: uv run ruff check . --output-format=concise
-
-      - name: Format check (ruff)
-        run: uv run ruff format --check .
-
-  test:
-    name: Test
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ${{ env.PROJECT_DIR }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "0.11.8"
-          python-version: "3.13"
-
-      - name: Install dependencies
-        run: uv sync --group deploy --group test
-
-      - name: Run tests with coverage
-        run: uv run pytest --cov=idi_ftm2j_shared --cov=idi_ftm2j_shared_infra --cov-report=xml:coverage.xml --cov-report=term -v
-
-  security:
-    name: Security
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      security-events: write
-    defaults:
-      run:
-        working-directory: ${{ env.PROJECT_DIR }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "0.11.8"
-          python-version: "3.13"
-
-      - name: Install dependencies
-        run: uv sync --group deploy
-
-
-      - name: Upgrade pip to patched version
-        run: uv pip install "pip>=26.1.2"
-
-      - name: Dependency vulnerability scan (pip-audit)
-        run: |
-          uv run pip-audit --desc --ignore-vuln CVE-2026-3219  # Pip vulnerability, no current fix
-
-      - name: CodeQL Analysis Init
-        uses: github/codeql-action/init@v4
-        with:
-          languages: python
-
-      - name: CodeQL Analysis Analyze
-        uses: github/codeql-action/analyze@v4
-
-  pulumi-preview:
-    name: Pulumi Preview
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write    # This is required for requesting JWT
-      contents: read     # This is required for actions/checkout
-    defaults:
-      run:
-        working-directory: ${{ env.PROJECT_DIR }}/pulumi-shared
-    env:
-      PULUMI_ACCESS_TOKEN: ${{ secrets.PULUMI_ACCESS_TOKEN }}
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_SECRET_PASSPHRASE }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup uv
-        uses: astral-sh/setup-uv@v4
-        with:
-          version: "0.11.8"
-          python-version: "3.13"
-
-      - name: Install Pulumi dependencies
-        run: cd ${{ github.workspace }}/${{ env.PROJECT_DIR }} && uv sync --group pulumi --group deploy
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_CHECKS }}
-          role-session-name: idi-github-ci
-          aws-region: ${{ secrets.AWS_REGION || 'us-east-2' }}
-
-      - name: Set Pulumi stack
-        id: stack
-        run: |
-          if [ "${{ github.base_ref }}" = "main" ] && [ "${{ vars.PROD_INFRA_READY }}" = "true" ]; then
-            echo "name=prod" >> $GITHUB_OUTPUT
-          else
-            echo "name=dev" >> $GITHUB_OUTPUT
-          fi
-
-      - name: Pulumi preview (${{ steps.stack.outputs.name }} stack)
-        run: |
-          pulumi login s3://${{ secrets.PULUMI_STATE_BUCKET }}
-          pulumi stack select ${{ steps.stack.outputs.name }} 2>/dev/null || pulumi stack init ${{ steps.stack.outputs.name }}
-          pulumi config set aws:region ${{ secrets.AWS_REGION || 'us-east-2' }}
-          uv run pulumi preview --non-interactive
+  checks:
+    uses: ./.github/workflows/pipeline-checks.yml
+    secrets: inherit
+    with:
+      app-name: ftm2j-shared
+      # The importable package (underscore form). The old workflow also passed
+      # `idi_ftm2j_shared_infra`, which matches no importable module (the pulumi
+      # infra lives in pulumi-shared/infra, imported as `infra`) — it measured
+      # nothing, so it's dropped rather than carried over.
+      cov-package: "idi_ftm2j_shared"
+      pulumi-dir: pulumi-shared
