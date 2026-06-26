@@ -33,6 +33,6 @@ pulumi.export("s3_endpoint_arn", network.s3_endpoint.arn)
 pulumi.export("dlq_url", queue.dlq.url)
 pulumi.export("dlq_arn", queue.dlq.arn)
 
-# SSM cross-stack parameters (names processors read from)
+# SSM cross-stack parameters (read by processors)
 pulumi.export("ssm_processor_bucket_name_param", params.processor_bucket_name_param.name)
 pulumi.export("ssm_dlq_name_param", params.dlq_name_param.name)
