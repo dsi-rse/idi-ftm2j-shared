@@ -109,25 +109,24 @@ Scope matters: **org** secrets/vars are a single value org-wide (not env-split);
 only **environment**-scoped ones split dev/prod, and environments are per-repo.
 So anything that genuinely differs dev↔prod must be environment-scoped.
 
-### Org-level (one value for all repos)
+### Org-level (genuinely one value for every repo)
+
+Only values that are identical across all repos belong here.
 
 ```bash
-# Variables
-gh variable set AWS_REGION          --org dsi-clinic --body "us-east-2"        --visibility all
-gh variable set PULUMI_STATE_BUCKET --org dsi-clinic --body "<state-bucket>"   --visibility all
+gh variable set AWS_REGION          --org dsi-clinic --body "us-east-2"      --visibility all
+gh variable set PULUMI_STATE_BUCKET --org dsi-clinic --body "<state-bucket>" --visibility all
 # Optional ECR repo-name override (only if you don't want "<project>-<env>"):
 # gh variable set ECR_REPOSITORY_PREFIX --org dsi-clinic --body "<prefix>" --visibility all
-
-# Secret — decrypts Pulumi state; cannot live in the state it protects.
-gh secret set PULUMI_CONFIG_PASSPHRASE --org dsi-clinic --visibility all
 ```
 
-> **Passphrase consolidation (fixes the pre-existing bug):** the old host
-> `checks.yml` read `PULUMI_SECRET_PASSPHRASE` while `deploy.yml` read
-> `PULUMI_CONFIG_PASSPHRASE`. The shared workflows use **`PULUMI_CONFIG_PASSPHRASE`
-> only**. Ensure that one secret holds the passphrase that actually encrypted the
-> state, and delete `PULUMI_SECRET_PASSPHRASE`. If they ever held different
-> values, preview and deploy were deriving different keys.
+> **`PULUMI_CONFIG_PASSPHRASE` is NOT org-level.** It's the per-stack state
+> encryption key, and each repo's state was initialized with its own passphrase —
+> a single org value would only ever decrypt one repo's state and break the rest.
+> Set it as a **repo-level secret** (below). An org secret is one shared value, so
+> it cannot represent per-repo passphrases regardless of visibility scope. If a
+> repo's passphrase also differs dev↔prod, scope it to the environment instead;
+> it still resolves because the deploy/preview jobs set `environment:`.
 
 > **Drop `PULUMI_ACCESS_TOKEN`** everywhere — vestigial with the `s3://` backend.
 
@@ -154,10 +153,19 @@ gh secret set AWS_ROLE_ARN_DEPLOY --repo "$REPO" --env prod --body "<prod-deploy
 gh secret set AWS_ROLE_ARN_CHECKS --repo "$REPO" --env dev  --body "<dev-checks-role-arn>"
 gh secret set AWS_ROLE_ARN_CHECKS --repo "$REPO" --env prod --body "<prod-checks-role-arn>"
 
-# Repo-level: deploy key (SSH, push access to this repo only) + prod-ready gate
-gh secret   set DEPLOY_KEY       --repo "$REPO"            # paste private key
-gh variable set PROD_INFRA_READY --repo "$REPO" --body "false"
+# Repo-level: this repo's own Pulumi state passphrase (each repo differs),
+# deploy key (SSH, push access to this repo only), prod-ready gate.
+gh secret   set PULUMI_CONFIG_PASSPHRASE --repo "$REPO"    # this repo's passphrase
+gh secret   set DEPLOY_KEY               --repo "$REPO"    # paste private key
+gh variable set PROD_INFRA_READY         --repo "$REPO" --body "false"
 ```
+
+> **Passphrase consolidation (fixes the pre-existing host bug):** the old host
+> `checks.yml` read `PULUMI_SECRET_PASSPHRASE` while `deploy.yml` read
+> `PULUMI_CONFIG_PASSPHRASE`. The shared workflows use **`PULUMI_CONFIG_PASSPHRASE`
+> only**. For each repo, set that one secret to the passphrase that actually
+> encrypted *that repo's* state, and delete any `PULUMI_SECRET_PASSPHRASE`. If the
+> two ever held different values, preview and deploy were deriving different keys.
 
 `GITHUB_TOKEN` is auto-provided (GHCR login) — nothing to set.
 
