@@ -1,0 +1,4 @@
+# Committed non-secret config for the prod stack.
+config:
+  idi:bucket_name: processor-storage
+  idi:dlq_retention_days: "14"

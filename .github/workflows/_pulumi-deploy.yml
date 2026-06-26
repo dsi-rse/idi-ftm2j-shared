@@ -1,0 +1,91 @@
+# Reusable workflow: deploy a Pulumi stack.
+#
+# Non-secret knobs now live in the committed Pulumi.<stack>.yaml, shared values
+# come from StackReference, and genuine secrets come from SSM Parameter Store at
+# task-launch. This step only sets what the workflow alone can know: the region
+# and the app name. The deploy reduces to: login -> stack select -> set
+# aws:region + idi:app_name -> pulumi up.
+#
+# Env split: the job sets `environment:` so the env-scoped AWS_ROLE_ARN_DEPLOY
+# resolves (org/repo secrets are NOT environment-aware, and `secrets: inherit`
+# does NOT pass environment secrets — each reusable workflow must declare them
+# and set `environment:` on the job). The prod approval gate is attached to the
+# `prod` environment; the prod-readiness gate (PROD_INFRA_READY) is applied by
+# the caller's `if:`.
+#
+# AWS_REGION is an org-level Variable (one value for all
+# repos), read directly from the `vars` context.
+name: _pulumi-deploy
+
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        description: Value for `idi:app_name`.
+        type: string
+        required: true
+      deploy-env:
+        description: Target stack / GitHub environment (dev or prod).
+        type: string
+        required: true
+      project-dir:
+        description: Repo dir to `uv sync` from.
+        type: string
+        default: "."
+      pulumi-dir:
+        description: Directory containing the Pulumi program (relative to project-dir).
+        type: string
+        default: "pulumi"
+      python-version:
+        type: string
+        default: "3.13"
+    secrets:
+      # AWS_ROLE_ARN_DEPLOY is environment-scoped and resolved by this job's
+      # `environment:` — it must NOT be declared as a workflow_call secret, since
+      # `secrets: inherit` cannot pass environment secrets.
+      PULUMI_CONFIG_PASSPHRASE:
+        description: Passphrase that decrypts Pulumi state. Single canonical name.
+        required: true
+
+jobs:
+  deploy:
+    name: Deploy Pulumi (${{ inputs.deploy-env }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.deploy-env }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
+        with:
+          version: "0.11.8"
+          python-version: ${{ inputs.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --group pulumi --group deploy
+        working-directory: ${{ inputs.project-dir }}
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEPLOY }}
+          role-session-name: idi-github-ci
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Configure Pulumi
+        working-directory: ${{ inputs.project-dir }}/${{ inputs.pulumi-dir }}
+        run: |
+          pulumi login s3://${{ vars.PULUMI_STATE_BUCKET }}
+          pulumi stack select ${{ inputs.deploy-env }} 2>/dev/null || pulumi stack init ${{ inputs.deploy-env }}
+          pulumi config set aws:region ${{ env.AWS_REGION }}
+          pulumi config set idi:app_name ${{ inputs.app-name }}
+
+      - name: Pulumi deploy
+        working-directory: ${{ inputs.project-dir }}/${{ inputs.pulumi-dir }}
+        run: uv run pulumi up --yes

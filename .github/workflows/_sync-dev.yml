@@ -1,0 +1,58 @@
+# Reusable workflow: after a main release, sync the stable version back to dev.
+#
+# Prefers a fast-forward (when dev hasn't diverged, it just advances to main's
+# bump commit — already authored by the bot — with no merge bubble); falls back
+# to a bot-authored merge commit only when dev moved mid-release. Either way the
+# commit is authored by `idi-deploy-bot`, so the version/deploy guards skip it
+# and dev does not re-trigger the pipeline.
+#
+# This DIRECT-PUSHES to dev (no PR), so DEPLOY_KEY must be allow-listed in the
+# repo's `dev` branch protection before migration, or the release succeeds but
+# this step fails.
+name: _sync-dev
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Stable version just released (used in the merge-commit message).
+        type: string
+        required: true
+      bot-name:
+        type: string
+        default: "idi-deploy-bot"
+      bot-email:
+        type: string
+        default: "idi-deploy-bot@users.noreply.github.com"
+    secrets:
+      DEPLOY_KEY:
+        description: SSH deploy key with push access to dev.
+        required: true
+
+jobs:
+  sync-dev:
+    name: Sync stable version to dev
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          ssh-key: ${{ secrets.DEPLOY_KEY }}
+
+      - name: Merge main into dev
+        run: |
+          git config user.name "${{ inputs.bot-name }}"
+          git config user.email "${{ inputs.bot-email }}"
+          git fetch origin main dev
+          git checkout -B dev origin/dev
+          # Prefer fast-forward (no merge bubble); only create a merge commit when
+          # dev diverged mid-release. The merge commit is the bot's, so guards skip it.
+          git merge --ff-only origin/main || \
+            git merge --no-ff origin/main \
+              -m "Merge main into dev (stable v${{ inputs.version }})"
+          git push origin dev
