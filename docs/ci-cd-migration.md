@@ -135,10 +135,17 @@ gh variable set PULUMI_STATE_BUCKET --org dsi-clinic --body "<state-bucket>" --v
 Run for each of: `idi-ftm2j-shared`, `idi-corporate-structure`,
 `idi-company-info`, `idi-sec-scraper`.
 
+> **`dev`/`prod` are the AWS-deploy environments — additive, not a replacement
+> for `release`.** The host repo already has a `release` environment that gates
+> PyPI publishing (trusted-publisher OIDC; its name is referenced in PyPI's
+> config — do not rename or delete it). After this, the host has three
+> environments: `dev`, `prod`, `release`. The three docker siblings don't publish
+> to PyPI, so they only get `dev`/`prod`.
+
 ```bash
 REPO=dsi-clinic/idi-corporate-structure   # repeat per repo
 
-# Create dev + prod environments
+# Create dev + prod environments (the host keeps its existing `release` too)
 gh api -X PUT "repos/$REPO/environments/dev"
 gh api -X PUT "repos/$REPO/environments/prod"
 
