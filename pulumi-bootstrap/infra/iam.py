@@ -180,6 +180,18 @@ aws.iam.RolePolicy(
                     "Resource": "*",
                 },
                 {
+                    # Read shared values + processor params during `pulumi preview`.
+                    "Sid": "SSMParameterRead",
+                    "Effect": "Allow",
+                    "Action": [
+                        "ssm:GetParameter",
+                        "ssm:GetParameters",
+                        "ssm:GetParametersByPath",
+                        "ssm:ListTagsForResource",
+                    ],
+                    "Resource": "arn:aws:ssm:*:059007901663:parameter/idi/*",
+                },
+                {
                     "Sid": "STSCallerIdentity",
                     "Effect": "Allow",
                     "Action": "sts:GetCallerIdentity",
@@ -396,6 +408,38 @@ aws.iam.RolePolicy(
                     "Effect": "Allow",
                     "Action": ["kms:Decrypt", "kms:GenerateDataKey"],
                     "Resource": "arn:aws:kms:us-east-2:059007901663:key/4f8164b4-9db3-42a8-8b68-943491061efe",
+                },
+                {
+                    # Encrypt/decrypt SSM SecureString secret params (.15) with the
+                    # AWS-managed alias/aws/ssm key. Scoped via ViaService so the
+                    # role can only use KMS through SSM, not for anything else.
+                    "Sid": "KMSForSSMSecureString",
+                    "Effect": "Allow",
+                    "Action": ["kms:Decrypt", "kms:GenerateDataKey"],
+                    "Resource": "*",
+                    "Condition": {
+                        "StringEquals": {"kms:ViaService": "ssm.us-east-2.amazonaws.com"}
+                    },
+                },
+                {
+                    # SSM Parameter Store: the shared stack writes /idi/<env>/shared/*
+                    # (bucket + DLQ names); processor stacks declare and read
+                    # /idi/<env>/<app>/* (incl. SecureString secrets). One shared
+                    # deploy role, so scoped to the whole /idi/ tree.
+                    "Sid": "SSMParameterFull",
+                    "Effect": "Allow",
+                    "Action": [
+                        "ssm:PutParameter",
+                        "ssm:GetParameter",
+                        "ssm:GetParameters",
+                        "ssm:GetParametersByPath",
+                        "ssm:DeleteParameter",
+                        "ssm:DeleteParameters",
+                        "ssm:AddTagsToResource",
+                        "ssm:RemoveTagsFromResource",
+                        "ssm:ListTagsForResource",
+                    ],
+                    "Resource": "arn:aws:ssm:*:059007901663:parameter/idi/*",
                 },
                 {
                     "Sid": "STSCallerIdentity",
