@@ -39,7 +39,7 @@ on:
         default: "idi-deploy-bot@users.noreply.github.com"
     secrets:
       DEPLOY_KEY:
-        description: SSH deploy key with push access (used to push the bump commit + tag).
+        description: SSH deploy key with push access, used to push the bump commit + tag.
         required: true
     outputs:
       version:
