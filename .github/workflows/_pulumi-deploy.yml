@@ -68,7 +68,7 @@ jobs:
           python-version: ${{ inputs.python-version }}
 
       - name: Install dependencies
-        run: uv sync --group pulumi --group deploy
+        run: uv sync --group pulumi
         working-directory: ${{ inputs.project-dir }}
 
       - name: Configure AWS credentials
