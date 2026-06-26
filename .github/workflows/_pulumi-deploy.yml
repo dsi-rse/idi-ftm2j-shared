@@ -1,8 +1,6 @@
 # Reusable workflow: deploy a Pulumi stack.
 #
-# Deliberately GENERIC. The old per-repo `pulumi config set idi:*` block (24
-# lines in company-info, a different set in each sibling) is gone — every
-# non-secret knob now lives in the committed Pulumi.<stack>.yaml, shared values
+# Non-secret knobs now live in the committed Pulumi.<stack>.yaml, shared values
 # come from StackReference, and genuine secrets come from SSM Parameter Store at
 # task-launch. This step only sets what the workflow alone can know: the region
 # and the app name. The deploy reduces to: login -> stack select -> set
@@ -15,9 +13,8 @@
 # `prod` environment; the prod-readiness gate (PROD_INFRA_READY) is applied by
 # the caller's `if:`.
 #
-# AWS_REGION and PULUMI_STATE_BUCKET are org-level Variables (one value for all
-# repos), read directly from the `vars` context. PULUMI_ACCESS_TOKEN is dropped
-# (vestigial with the s3:// backend).
+# AWS_REGION is an org-level Variable (one value for all
+# repos), read directly from the `vars` context.
 name: _pulumi-deploy
 
 on:
@@ -64,12 +61,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python + uv
-        uses: dsi-clinic/idi-ftm2j-shared/.github/actions/setup-python-uv@ci-v1
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
         with:
+          version: "0.11.8"
           python-version: ${{ inputs.python-version }}
-          sync-args: "--group pulumi --group deploy"
-          working-directory: ${{ inputs.project-dir }}
+
+      - name: Install dependencies
+        run: uv sync --group pulumi --group deploy
+        working-directory: ${{ inputs.project-dir }}
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4

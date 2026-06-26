@@ -8,6 +8,12 @@
 # so the thin caller can invoke it with no `with:` block. Loop prevention and the
 # prod gate mirror pipeline-docker. PyPI publish happens on main only; dev still
 # tags + cuts a prerelease but does not publish.
+#
+# Versioning the shared workflows: this repo hosts the reusable workflows that
+# siblings pin at an exact `@vX.Y.Z`, so a change under `.github/**` also cuts a
+# version (so there's a new immutable tag to pin) — but the PyPI publish stays
+# gated on `src`, so a CI-only change bumps + tags + releases without publishing
+# an unchanged package.
 name: pipeline-pypi
 
 on:
@@ -48,11 +54,15 @@ jobs:
           - 'uv.lock'
         pulumi:
           - 'pulumi-shared/**'
+        github:
+          - '.github/**'
 
   version:
     needs: changes
+    # Bump on package OR shared-workflow changes, so every change to the
+    # reusable workflows produces a new immutable tag siblings can pin.
     if: >
-      needs.changes.outputs.src == 'true'
+      (needs.changes.outputs.src == 'true' || needs.changes.outputs.github == 'true')
       && github.event.head_commit.committer.name != 'idi-deploy-bot'
     uses: ./.github/workflows/_version.yml
     with:
@@ -62,8 +72,10 @@ jobs:
     secrets: inherit
 
   build-publish:
-    needs: version
-    if: github.ref == 'refs/heads/main'
+    needs: [changes, version]
+    # Publish only when the package itself changed — a CI-only version bump
+    # tags/releases but must not publish an unchanged package to PyPI.
+    if: needs.changes.outputs.src == 'true' && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/_build-publish-pypi.yml
     with:
       version: ${{ needs.version.outputs.version }}

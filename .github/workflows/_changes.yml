@@ -29,6 +29,8 @@ on:
             - 'src/**'
             - 'pyproject.toml'
             - 'uv.lock'
+          github:
+            - '.github/**'
     outputs:
       src:
         description: Source/packaging changed (drives PyPI build).
@@ -39,6 +41,9 @@ on:
       docker:
         description: Anything that affects the built image changed.
         value: ${{ jobs.changes.outputs.docker }}
+      github:
+        description: Shared CI files changed (workflows/actions) — used to cut a pinnable version.
+        value: ${{ jobs.changes.outputs.github }}
       deploy:
         description: Aggregate — true when any deploy-relevant path changed.
         value: ${{ jobs.changes.outputs.deploy }}
@@ -56,6 +61,7 @@ jobs:
       src: ${{ steps.filter.outputs.src }}
       pulumi: ${{ steps.filter.outputs.pulumi }}
       docker: ${{ steps.filter.outputs.docker }}
+      github: ${{ steps.filter.outputs.github }}
       deploy: ${{ steps.aggregate.outputs.deploy }}
       deploy_env: ${{ steps.env.outputs.deploy_env }}
     steps:

@@ -1,16 +1,7 @@
 # Composition: PR quality gate — lint, test, security, pulumi preview.
 #
 # Every repo's thin `checks.yml` calls this with `secrets: inherit`. The PR
-# trigger set (and dropping `issue-*`) lives in that thin caller, not here.
-#
-# Standardizations folded in:
-#   - cov-package input fixes a REAL coverage bug: corporate-structure and
-#     sec-scraper ran `--cov=<APP_NAME>` with a hyphenated name that is not the
-#     importable package, so coverage silently measured nothing. Callers now pass
-#     the underscore package name(s). Accepts a space-separated list for repos
-#     (like this one) that cover more than one package.
-#   - One `security` job: every repo upgrades pip to the patched version and runs
-#     pip-audit with the same ignore (sec-scraper previously omitted both).
+# trigger set lives in that thin caller, not here.
 #
 # pulumi-preview uses the lower-privilege AWS_ROLE_ARN_CHECKS and previews the
 # prod stack only when the PR targets main and prod is marked ready; otherwise
@@ -58,12 +49,13 @@ jobs:
         working-directory: ${{ inputs.project-dir }}
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Python + uv
-        uses: dsi-clinic/idi-ftm2j-shared/.github/actions/setup-python-uv@ci-v1
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
         with:
+          version: "0.11.8"
           python-version: ${{ inputs.python-version }}
-          sync-args: ${{ inputs.sync-args }}
-          working-directory: ${{ inputs.project-dir }}
+      - name: Install dependencies
+        run: uv sync ${{ inputs.sync-args }}
       - name: Lint (ruff)
         run: uv run ruff check . --output-format=concise
       - name: Format check (ruff)
@@ -77,12 +69,13 @@ jobs:
         working-directory: ${{ inputs.project-dir }}
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Python + uv
-        uses: dsi-clinic/idi-ftm2j-shared/.github/actions/setup-python-uv@ci-v1
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
         with:
+          version: "0.11.8"
           python-version: ${{ inputs.python-version }}
-          sync-args: ${{ inputs.sync-args }}
-          working-directory: ${{ inputs.project-dir }}
+      - name: Install dependencies
+        run: uv sync ${{ inputs.sync-args }}
       - name: Run tests with coverage
         run: |
           COV_ARGS=""
@@ -102,12 +95,13 @@ jobs:
         working-directory: ${{ inputs.project-dir }}
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Python + uv
-        uses: dsi-clinic/idi-ftm2j-shared/.github/actions/setup-python-uv@ci-v1
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
         with:
+          version: "0.11.8"
           python-version: ${{ inputs.python-version }}
-          sync-args: ${{ inputs.sync-args }}
-          working-directory: ${{ inputs.project-dir }}
+      - name: Install dependencies
+        run: uv sync ${{ inputs.sync-args }}
       - name: Upgrade pip to patched version
         run: uv pip install "pip>=26.1.2"
       - name: Dependency vulnerability scan (pip-audit)
@@ -133,12 +127,14 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
     steps:
       - uses: actions/checkout@v4
-      - name: Setup Python + uv
-        uses: dsi-clinic/idi-ftm2j-shared/.github/actions/setup-python-uv@ci-v1
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
         with:
+          version: "0.11.8"
           python-version: ${{ inputs.python-version }}
-          sync-args: "--group pulumi --group deploy"
-          working-directory: ${{ inputs.project-dir }}
+      - name: Install dependencies
+        run: uv sync --group pulumi --group deploy
+        working-directory: ${{ inputs.project-dir }}
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
