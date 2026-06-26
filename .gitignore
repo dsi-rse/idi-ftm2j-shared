@@ -232,6 +232,8 @@ __pycache__
 logs/
 
 # Pulumi
+# NOTE: Pulumi.<stack>.yaml files are intentionally COMMITTED (config-as-code)—
+# they hold only non-secret knobs; secrets live in AWS SSM.
 pulumi-bootstrap/venv/
 pulumi-bootstrap/__pycache__/
 pulumi-bootstrap/.pulumi/
@@ -240,7 +242,6 @@ pulumi-bootstrap/Pulumi.dev.yaml
 pulumi-shared/venv/
 pulumi-shared/__pycache__/
 pulumi-shared/.pulumi/
-pulumi-shared/Pulumi.dev.yaml
 
 # Beads / Dolt files (added by bd init)
 .dolt/

@@ -1,0 +1,96 @@
+# Reusable workflow: detect what changed and resolve the deploy environment.
+#
+# Replaces the siblings' always-run behavior with path-filtered gating (the host
+# repo already did this). Downstream jobs in a composition gate on these outputs
+# so an unrelated push (docs, beads, etc.) doesn't rebuild images or run Pulumi.
+#
+# `deploy_env` is derived once here (main -> prod, anything else -> dev) and
+# threaded through the composition so every job agrees on the target stack.
+name: _changes
+
+on:
+  workflow_call:
+    inputs:
+      filters:
+        description: >
+          dorny/paths-filter `filters` YAML. Must define the keys consumed as
+          outputs below (src, pulumi, docker). Keys that don't apply to a repo
+          can be omitted; their output is then "false".
+        type: string
+        default: |
+          src:
+            - 'src/**'
+            - 'pyproject.toml'
+            - 'uv.lock'
+          pulumi:
+            - 'pulumi/**'
+          docker:
+            - 'dockerfiles/**'
+            - 'src/**'
+            - 'pyproject.toml'
+            - 'uv.lock'
+          github:
+            - '.github/**'
+    outputs:
+      src:
+        description: Source/packaging changed (drives PyPI build).
+        value: ${{ jobs.changes.outputs.src }}
+      pulumi:
+        description: Pulumi program changed.
+        value: ${{ jobs.changes.outputs.pulumi }}
+      docker:
+        description: Anything that affects the built image changed.
+        value: ${{ jobs.changes.outputs.docker }}
+      github:
+        description: Shared CI files changed (workflows/actions) — used to cut a pinnable version.
+        value: ${{ jobs.changes.outputs.github }}
+      deploy:
+        description: Aggregate — true when any deploy-relevant path changed.
+        value: ${{ jobs.changes.outputs.deploy }}
+      deploy_env:
+        description: Target environment for this ref (prod on main, else dev).
+        value: ${{ jobs.changes.outputs.deploy_env }}
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      src: ${{ steps.filter.outputs.src }}
+      pulumi: ${{ steps.filter.outputs.pulumi }}
+      docker: ${{ steps.filter.outputs.docker }}
+      github: ${{ steps.filter.outputs.github }}
+      deploy: ${{ steps.aggregate.outputs.deploy }}
+      deploy_env: ${{ steps.env.outputs.deploy_env }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # On a push, compare against the commit the branch moved from so the
+          # filter reflects this push's diff; on other events dorny picks a base.
+          base: ${{ github.event.before }}
+          filters: ${{ inputs.filters }}
+
+      - name: Aggregate deploy signal
+        id: aggregate
+        run: |
+          if [ "${{ steps.filter.outputs.src }}" = "true" ] \
+            || [ "${{ steps.filter.outputs.pulumi }}" = "true" ] \
+            || [ "${{ steps.filter.outputs.docker }}" = "true" ]; then
+            echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Resolve deploy environment
+        id: env
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "deploy_env=prod" >> "$GITHUB_OUTPUT"
+          else
+            echo "deploy_env=dev" >> "$GITHUB_OUTPUT"
+          fi

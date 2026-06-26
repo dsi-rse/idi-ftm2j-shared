@@ -1,0 +1,85 @@
+# Reusable workflow: re-tag GHCR images into ECR.
+#
+# One repo-name formula for every image:
+#   <ecr-prefix>-<app-name>-<image.name>
+# where <ecr-prefix> defaults to "<pulumi-project>-<deploy-env>" and can be
+# overridden org-wide by the ECR_REPOSITORY_PREFIX variable.
+#
+# Pulls each GHCR image at the run's version and pushes both the version tag and
+# a moving `latest` to ECR. Env-scoped role via `environment:`.
+name: _sync-ecr
+
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        type: string
+        required: true
+      version:
+        type: string
+        required: true
+      deploy-env:
+        type: string
+        required: true
+      pulumi-project:
+        description: Pulumi project name (default ECR prefix component).
+        type: string
+        required: true
+      images:
+        description: Same JSON array passed to _docker-build.
+        type: string
+        required: true
+      registry:
+        type: string
+        default: "ghcr.io"
+      image-prefix:
+        type: string
+        default: "idi"
+    # No workflow_call secrets to declare: AWS_ROLE_ARN_DEPLOY is environment-
+    # scoped and resolved by the job's `environment:`, not passed by the caller.
+
+jobs:
+  sync-ecr:
+    name: Sync ${{ matrix.image.name }} to ECR (${{ inputs.deploy-env }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.deploy-env }}
+    permissions:
+      id-token: write
+      contents: read
+      packages: read
+    strategy:
+      matrix:
+        image: ${{ fromJSON(inputs.images) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEPLOY }}
+          role-session-name: idi-github-ci
+          aws-region: ${{ vars.AWS_REGION || 'us-east-2' }}
+
+      - name: Login to Amazon ECR
+        id: ecr-login
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Re-tag and push to ECR
+        env:
+          ECR_PREFIX: ${{ vars.ECR_REPOSITORY_PREFIX || format('{0}-{1}', inputs.pulumi-project, inputs.deploy-env) }}
+        run: |
+          ECR_REPO="${ECR_PREFIX}-${{ inputs.app-name }}-${{ matrix.image.name }}"
+          ECR_URI="${{ steps.ecr-login.outputs.registry }}/$ECR_REPO"
+          GHCR_IMG="${{ inputs.registry }}/${{ github.repository_owner }}/${{ inputs.image-prefix }}-${{ inputs.app-name }}-${{ matrix.image.name }}"
+          docker pull "${GHCR_IMG}:${{ inputs.version }}"
+          docker tag "${GHCR_IMG}:${{ inputs.version }}" "${ECR_URI}:${{ inputs.version }}"
+          docker tag "${GHCR_IMG}:${{ inputs.version }}" "${ECR_URI}:latest"
+          docker push "${ECR_URI}:${{ inputs.version }}"
+          docker push "${ECR_URI}:latest"

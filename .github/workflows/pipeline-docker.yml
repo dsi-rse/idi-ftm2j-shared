@@ -1,0 +1,107 @@
+# Composition: post-merge pipeline for the Docker processors (the 3 siblings).
+#
+#   changes ─► version ─┬─► docker ─► deploy-pulumi ─► sync-ecr
+#                       └─► sync-dev                 (main only: merge main->dev)
+#
+# Each sibling's thin `deploy.yml` calls this with `secrets: inherit`, passing
+# only `app-name` and `images`. Loop prevention: the `version` job is guarded on
+# the committer identity, so the whole chain skips on the deploy bot's own
+# bump/sync commits. The literal 'idi-deploy-bot' MUST match the identity in
+# _version.yml / _sync-dev.yml.
+#
+# Prod is gated on PROD_INFRA_READY: a main push still versions, releases, and
+# pushes the image to GHCR, but deploy-pulumi (and therefore the ECR sync) is
+# skipped until the processor flips its var to 'true'.
+name: pipeline-docker
+
+on:
+  workflow_call:
+    inputs:
+      app-name:
+        type: string
+        required: true
+      images:
+        description: >
+          JSON array of {name, dockerfile}, e.g.
+          '[{"name":"orchestrator","dockerfile":"dockerfiles/Dockerfile.orchestrator"}]'.
+        type: string
+        required: true
+      project-dir:
+        type: string
+        default: "."
+      pulumi-dir:
+        type: string
+        default: "pulumi"
+      image-prefix:
+        type: string
+        default: "idi"
+      python-version:
+        type: string
+        default: "3.13"
+    secrets:
+      # AWS_ROLE_ARN_DEPLOY is environment-scoped — not declared here; the
+      # deploy-pulumi and sync-ecr jobs resolve it via their `environment:`.
+      DEPLOY_KEY:
+        required: true
+      PULUMI_CONFIG_PASSPHRASE:
+        required: true
+
+jobs:
+  changes:
+    uses: ./.github/workflows/_changes.yml
+
+  version:
+    needs: changes
+    if: >
+      needs.changes.outputs.deploy == 'true'
+      && github.event.head_commit.committer.name != 'idi-deploy-bot'
+    uses: ./.github/workflows/_version.yml
+    with:
+      project-dir: ${{ inputs.project-dir }}
+      python-version: ${{ inputs.python-version }}
+      pulumi-project-file: ${{ inputs.pulumi-dir }}/Pulumi.yaml
+    secrets: inherit
+
+  docker:
+    needs: version
+    uses: ./.github/workflows/_docker-build.yml
+    with:
+      app-name: ${{ inputs.app-name }}
+      version: ${{ needs.version.outputs.version }}
+      images: ${{ inputs.images }}
+      project-dir: ${{ inputs.project-dir }}
+      image-prefix: ${{ inputs.image-prefix }}
+    secrets: inherit
+
+  sync-dev:
+    needs: version
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/_sync-dev.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+    secrets: inherit
+
+  deploy-pulumi:
+    needs: [changes, version, docker]
+    # Always on dev; on prod only once the processor marks its infra ready.
+    if: needs.changes.outputs.deploy_env != 'prod' || vars.PROD_INFRA_READY == 'true'
+    uses: ./.github/workflows/_pulumi-deploy.yml
+    with:
+      app-name: ${{ inputs.app-name }}
+      deploy-env: ${{ needs.changes.outputs.deploy_env }}
+      project-dir: ${{ inputs.project-dir }}
+      pulumi-dir: ${{ inputs.pulumi-dir }}
+      python-version: ${{ inputs.python-version }}
+    secrets: inherit
+
+  sync-ecr:
+    needs: [changes, version, docker, deploy-pulumi]
+    uses: ./.github/workflows/_sync-ecr.yml
+    with:
+      app-name: ${{ inputs.app-name }}
+      version: ${{ needs.version.outputs.version }}
+      deploy-env: ${{ needs.changes.outputs.deploy_env }}
+      pulumi-project: ${{ needs.version.outputs.pulumi_project }}
+      images: ${{ inputs.images }}
+      image-prefix: ${{ inputs.image-prefix }}
+    secrets: inherit
