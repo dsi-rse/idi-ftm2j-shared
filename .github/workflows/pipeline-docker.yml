@@ -11,8 +11,7 @@
 #
 # Prod is gated on PROD_INFRA_READY: a main push still versions, releases, and
 # pushes the image to GHCR, but deploy-pulumi (and therefore the ECR sync) is
-# skipped until the processor flips its var to 'true'. `issue-*` deploys are
-# dropped — the thin caller only triggers on main/dev.
+# skipped until the processor flips its var to 'true'.
 name: pipeline-docker
 
 on:

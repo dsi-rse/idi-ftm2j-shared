@@ -1,15 +1,5 @@
 # Reusable workflow: build & push image(s) to GHCR.
 #
-# Standardizes two divergences:
-#   - The image matrix: sec-scraper builds scraper/Dockerfile.scraper, the others
-#     orchestrator/Dockerfile.orchestrator. Callers pass an `images` JSON array
-#     of {name, dockerfile} instead of hand-writing per-image jobs.
-#   - The image-name formula: one form for all repos —
-#       <registry>/<owner>/<image-prefix>-<app-name>-<image.name>
-#     (company-info previously folded the app into IMAGE_PREFIX=idi-company-info;
-#     with image-prefix=idi + app-name=company-info this yields the identical
-#     name, so it converges with no rename.)
-#
 # Each image gets the run's version tag plus a moving `latest`. GITHUB_TOKEN
 # auto-provides GHCR auth.
 name: _docker-build

@@ -3,10 +3,7 @@
 # One repo-name formula for every image:
 #   <ecr-prefix>-<app-name>-<image.name>
 # where <ecr-prefix> defaults to "<pulumi-project>-<deploy-env>" and can be
-# overridden org-wide by the ECR_REPOSITORY_PREFIX variable. This normalizes
-# sec-scraper, whose old formula dropped the image suffix (its ECR repo was
-# "<project>-<env>-sec-scraper", not "...-sec-scraper-scraper") — after migration
-# the suffix is always present, matching the other two repos.
+# overridden org-wide by the ECR_REPOSITORY_PREFIX variable.
 #
 # Pulls each GHCR image at the run's version and pushes both the version tag and
 # a moving `latest` to ECR. Env-scoped role via `environment:`.

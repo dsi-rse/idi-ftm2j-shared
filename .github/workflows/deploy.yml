@@ -1,8 +1,7 @@
 # Post-merge pipeline for this repo (the shared PyPI package + shared infra).
 #
 # Thin caller: all logic lives in the reusable composition pipeline-pypi.yml,
-# referenced locally (./) since it's in this same repo. This dogfoods the shared
-# flow here before the docker siblings adopt it. The composition runs:
+# referenced locally (./) since it's in this same repo. The composition runs:
 #   changes -> version -> {build-publish (main only), sync-dev (main)} and
 #   changes -> deploy-pulumi (when pulumi-shared/** changed).
 #

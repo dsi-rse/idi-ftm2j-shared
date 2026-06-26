@@ -232,8 +232,8 @@ __pycache__
 logs/
 
 # Pulumi
-# NOTE: Pulumi.<stack>.yaml files are intentionally COMMITTED (config-as-code,
-# issue #25) — they hold only non-secret knobs; genuine secrets live in AWS SSM.
+# NOTE: Pulumi.<stack>.yaml files are intentionally COMMITTED (config-as-code)—
+# they hold only non-secret knobs; secrets live in AWS SSM.
 pulumi-bootstrap/venv/
 pulumi-bootstrap/__pycache__/
 pulumi-bootstrap/.pulumi/

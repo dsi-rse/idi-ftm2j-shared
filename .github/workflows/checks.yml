@@ -1,9 +1,7 @@
 # PR quality gate for this repo. Thin caller of the shared pipeline-checks.yml
 # composition (lint, test, security, pulumi preview), referenced locally (./).
 #
-# One standardized trigger set: PRs targeting main or dev. The old
-# release/release**/issue-* targets are dropped — issue branches still get checks
-# because their PRs target dev (the trigger keys on the base branch, not source).
+# One standardized trigger set: PRs targeting main or dev.
 name: Checks
 
 on:

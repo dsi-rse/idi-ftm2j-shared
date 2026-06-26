@@ -1,9 +1,4 @@
-# Committed non-secret config for the prod stack (issue #25, config-as-code).
-#
-# See Pulumi.dev.yaml for rationale. The bucket name resolves to
-# "{project}-prod-{app_name}-{bucket_name}", distinct from dev, so this value can
-# match dev. Keep it equal to the prior BUCKET_NAME secret value to avoid
-# renaming (and thus recreating) the bucket.
+# Committed non-secret config for the prod stack.
 config:
   idi:bucket_name: processor-storage
   idi:dlq_retention_days: "14"
