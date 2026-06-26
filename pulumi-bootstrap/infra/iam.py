@@ -192,6 +192,14 @@ aws.iam.RolePolicy(
                     "Resource": "arn:aws:ssm:*:059007901663:parameter/idi/*",
                 },
                 {
+                    # DescribeParameters has no resource-level scoping (must be "*");
+                    # the AWS provider calls it to read parameter metadata.
+                    "Sid": "SSMDescribeParameters",
+                    "Effect": "Allow",
+                    "Action": "ssm:DescribeParameters",
+                    "Resource": "*",
+                },
+                {
                     "Sid": "STSCallerIdentity",
                     "Effect": "Allow",
                     "Action": "sts:GetCallerIdentity",
@@ -440,6 +448,15 @@ aws.iam.RolePolicy(
                         "ssm:ListTagsForResource",
                     ],
                     "Resource": "arn:aws:ssm:*:059007901663:parameter/idi/*",
+                },
+                {
+                    # The AWS provider reads parameter metadata via
+                    # DescribeParameters, a list action with no resource-level
+                    # scoping — it must be Resource "*".
+                    "Sid": "SSMDescribeParameters",
+                    "Effect": "Allow",
+                    "Action": "ssm:DescribeParameters",
+                    "Resource": "*",
                 },
                 {
                     "Sid": "STSCallerIdentity",
