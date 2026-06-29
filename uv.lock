@@ -389,7 +389,7 @@ wheels = [
 
 [[package]]
 name = "idi-ftm2j-shared"
-version = "0.1.10"
+version = "0.1.11"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },
