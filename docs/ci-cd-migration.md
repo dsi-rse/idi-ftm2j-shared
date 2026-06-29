@@ -15,7 +15,7 @@ Org is assumed to be `dsi-clinic`. Adjust commands to your `gh` auth/admin scope
 | Store | Holds | Why |
 |---|---|---|
 | **GitHub** (org/repo/env) | bootstrap creds to *reach* AWS/Pulumi/git, prod gate | only thing that must exist before Pulumi runs |
-| **Pulumi StackReference** | shared non-secret values (bucket/DLQ) | one producer, many consumers — issue `.14` |
+| **AWS SSM `String`** (`/idi/<env>/shared/*`) | shared non-secret values (bucket/DLQ) | one producer publishes, many consumers read via `aws.ssm.get_parameter` — issue `.14` (chosen over StackReference to keep the shared `idi` project name + clean `name_prefix`) |
 | **AWS SSM `SecureString`** | genuine API-key secrets | repos are public; keeps secrets out of git + state — issue `.15` |
 | **Committed `Pulumi.<stack>.yaml`** | all non-secret per-processor knobs | git audit trail / `git revert` — issue `.16` (this doc) |
 
@@ -289,9 +289,11 @@ condition.
 2. Set org vars/secrets (`.17`).
 3. Per repo: create dev/prod environments, env-scoped role ARNs, `DEPLOY_KEY`,
    `PROD_INFRA_READY=false`; confirm `dev` allows the deploy-key push.
-4. Wire config homes: StackReference (`.14`), SSM params + set values out-of-band
-   (`.15`), committed `Pulumi.<stack>.yaml` (`.16`). Deploy the **shared** stack
-   first per env so its exports exist for StackReference.
+4. Wire config homes: shared bucket/DLQ published to SSM `/idi/<env>/shared/*`
+   and read via `aws.ssm.get_parameter` (`.14`), genuine secrets as SSM
+   `SecureString` params + set values out-of-band (`.15`), committed
+   `Pulumi.<stack>.yaml` (`.16`). Deploy the **shared** stack first per env so
+   its SSM params exist for siblings to read.
 5. Migrate `idi-corporate-structure` first (simplest); verify a dev push, then a
    dev→main release + sync-dev; then roll company-info and sec-scraper.
 6. Flip each repo's `PROD_INFRA_READY=true` once its prod stack is verified.
