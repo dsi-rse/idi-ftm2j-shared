@@ -18,14 +18,21 @@ pulumi preview
 pulumi up
 ```
 
-**Roles created:**
+**Roles created (per repository):**
 
 | Role | Assumed by | Access |
 |------|-----------|--------|
 | `checks` | Pull requests, manual `workflow_dispatch` runs | Read-only (`pulumi preview`) |
 | `deploy` | Pushes to `main`, `dev`, `release/**` | Full deploy (`pulumi up`) |
 
-Both roles trust any repository in the `dsi-clinic` org — no updates needed when new repos are added.
+Each repository gets its **own** `checks` + `deploy` role pair, trust-scoped to
+`repo:dsi-clinic/<repo>` so a repo's workflows can assume only its own roles. The
+stack loops over the `idi:repos` list (defaulted in
+[`infra/config.py`](pulumi-bootstrap/infra/config.py)); **to onboard a new repo,
+add its name to that list and re-deploy this stack**, then read its ARNs from the
+`checks_role_arns` / `deploy_role_arns` stack outputs. See
+[docs/onboarding-a-processor.md](docs/onboarding-a-processor.md) for the full
+processor checklist.
 
 ---
 

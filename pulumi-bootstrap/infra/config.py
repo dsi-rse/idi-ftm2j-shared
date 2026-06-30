@@ -12,9 +12,12 @@ app_name             : Application identifier from ``idi:app_name`` config; defa
 name_prefix          : ``{project}-{stack}-{app_name}`` — prepended to every resource
                        name to keep them unique and identifiable.
 github_org           : GitHub organisation whose repos may assume the OIDC roles.
-deploy_sub_conditions: List of ``ref:refs/heads/...`` patterns appended to the org
-                       prefix to form the deploy role's trust policy sub conditions.
-                       Defaults to ``["ref:refs/heads/*"]`` (any branch).
+repos                : Repositories that each get their own isolated pair of OIDC
+                       roles (checks + deploy). Add a repo here and re-deploy to
+                       provision its role pair. Overridable via ``idi:repos``.
+deploy_sub_conditions: List of ``ref:refs/heads/...`` patterns appended to the
+                       per-repo prefix to form the deploy role's trust policy sub
+                       conditions. Defaults to main/dev/release + dev/prod envs.
 aws_region           : Deployment region from ``aws:region`` config.
 caller               : AWS caller identity (exposes ``.account_id``, ``.arn``).
 """
@@ -29,6 +32,17 @@ app_name = config.get("app_name") or "ftm2j-shared"
 name_prefix = f"{project_name}-{stack_name}-{app_name}"
 
 github_org = config.require("github_org")
+
+# Each repo gets its own isolated checks + deploy role pair (see iam.py). Add a
+# repo here (or override via `idi:repos`) and re-deploy this stack to provision
+# its roles; the repo's workflows then assume only its own role ARNs.
+repos: list[str] = config.get_object("repos") or [
+    "idi-ftm2j-shared",
+    "idi-corporate-structure",
+    "idi-company-info",
+    "idi-sec-scraper",
+]
+
 checks_sub_conditions: list[str] = config.get_object("checks_sub_conditions") or [
     "pull_request",
     "ref:refs/heads/*",

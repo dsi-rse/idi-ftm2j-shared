@@ -144,9 +144,42 @@ gh secret set DEPLOY_KEY --repo "dsi-clinic/<repo>" < ~/.ssh/<repo>_deploy_key
 
 Then add the deploy key to `dev`'s branch-protection bypass list (§2).
 
+Add the deploy key to the Bitwarden account, under `ftm2j/{repo-name}/DEPLOY_KEY`.
+
 ---
 
-## 4. Where each value goes (routing table)
+## 4. Provision the repo's OIDC roles (pulumi-bootstrap)
+
+Each repo assumes its **own** AWS roles — there is no shared org-wide role. The
+`pulumi-bootstrap` stack loops over a repo list and creates a `checks` + `deploy`
+role pair per repo, trust-scoped to `repo:dsi-clinic/<repo>` so only that repo's
+workflows can assume them.
+
+1. Add the repo to the `repos` list in
+   [`pulumi-bootstrap/infra/config.py`](../pulumi-bootstrap/infra/config.py) (or
+   override `idi:repos` in `Pulumi.<stack>.yaml`):
+   ```python
+   repos: list[str] = config.get_object("repos") or [
+       "idi-ftm2j-shared",
+       "idi-corporate-structure",
+       "idi-company-info",
+       "idi-sec-scraper",
+       "idi-<your-new-repo>",   # add here
+   ]
+   ```
+2. Re-deploy the bootstrap stack **per env** (run locally — it mints the very roles
+   CI uses, so CI can't deploy it). `pulumi up` against `dev` and `prod`.
+3. Read the new ARNs from the stack outputs — `checks_role_arns` and
+   `deploy_role_arns` are maps keyed by repo:
+   ```bash
+   cd pulumi-bootstrap && pulumi stack output deploy_role_arns
+   ```
+   Use that repo's `checks` ARN for `AWS_ROLE_ARN_CHECKS` and its `deploy` ARN for
+   `AWS_ROLE_ARN_DEPLOY` in §5.
+
+---
+
+## 5. Where each value goes (routing table)
 
 Every configuration value has exactly one home. Don't guess — match the value to
 its row.
@@ -156,15 +189,12 @@ its row.
 | **Non-secret per-processor knobs** | `cpu`, `memory`, `cron_*`, `schedule_enabled`, model, sample size, `input_file`, batch sizes | Committed `pulumi/Pulumi.dev.yaml` + `pulumi/Pulumi.prod.yaml` (`idi:*` keys) | Commit to git. All values are **strings** — quote numbers (`"1024"`) and booleans (`"true"`). Keep `cron_*`/`schedule_enabled` per-env if prod should run on a different cadence than dev. |
 | **Genuine secrets** | API keys (`openai_api_key`, `permid_api_key`, …) | AWS SSM **`SecureString`** at `/idi/<env>/<app>/secrets/*` | Pulumi creates a placeholder; set the real value out-of-band: `aws ssm put-parameter --name /idi/<env>/<app>/secrets/<key> --type SecureString --value '<v>' --overwrite`. **Repos are PUBLIC — never commit these, even encrypted.** |
 | **Shared values** | processor bucket name, DLQ name | AWS SSM **`String`** at `/idi/<env>/shared/*` | **Nothing per repo.** Published by the shared stack; processors read via `aws.ssm.get_parameter`. |
-| **GitHub Environment secrets** (dev/prod) | `AWS_ROLE_ARN_DEPLOY`, `AWS_ROLE_ARN_CHECKS` | Per-repo, scoped to the `dev` and `prod` environments | `gh secret set <NAME> --repo "$REPO" --env dev` / `--env prod`. Env scope is required so the prod approval gate and per-env role ARNs work. |
+| **GitHub Environment secrets** (dev/prod) | `AWS_ROLE_ARN_DEPLOY`, `AWS_ROLE_ARN_CHECKS` | Per-repo, scoped to the `dev` and `prod` environments | `gh secret set <NAME> --repo "$REPO" --env dev` / `--env prod`. Values are this repo's own bootstrap role ARNs from §4. Env scope is required so the prod approval gate and per-env role ARNs work. |
 | **Pulumi state passphrase** | `PULUMI_CONFIG_PASSPHRASE` | Per-repo secret (env-scoped only if it differs dev↔prod) | `gh secret set PULUMI_CONFIG_PASSPHRASE --repo "$REPO"`. **Not org-level** — each repo's state was encrypted with its own passphrase; one org value would decrypt only one repo. |
-| **GitHub vars** | `PULUMI_STATE_BUCKET`, `AWS_REGION` (optional, defaults `us-east-2`), `ECR_REPOSITORY_PREFIX` (optional override of `<project>-<env>`), `PROD_INFRA_READY` | Org-level for the values identical across repos; `PROD_INFRA_READY` is per-repo | `gh variable set …`. See §5 for `PROD_INFRA_READY`. |
+| **GitHub vars** | `PULUMI_STATE_BUCKET`, `AWS_REGION` (optional, defaults `us-east-2`), `ECR_REPOSITORY_PREFIX` (optional override of `<project>-<env>`), `PROD_INFRA_READY` | Org-level for the values identical across repos; `PROD_INFRA_READY` is per-repo | `gh variable set …`. See §6 for `PROD_INFRA_READY`. |
 
 `idi:app_name` is **not** committed to the stack files — the workflow sets it from
-the `app-name` caller input. After moving a value into a stack file, **delete the
-old GitHub secret** so there's one source of truth; the shared workflow sets no
-`idi:*` key except `app_name`, so anything left only in a secret is silently
-dropped.
+the `app-name` caller input.
 
 Environments: processors get **`dev`** and **`prod`** only (no `release` — that's
 PyPI). Add a required-reviewer approval gate on `prod`:
@@ -178,7 +208,7 @@ gh api -X PUT "repos/$REPO/environments/prod" \
 
 ---
 
-## 5. Prod-readiness sequence
+## 6. Prod-readiness sequence
 
 Migration is staged so a repo can go live on `dev` immediately while prod stays
 dark until its AWS infra exists.

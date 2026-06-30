@@ -15,14 +15,21 @@ config:
     description: Name of the application
     value: "ftm2j-shared"
 
+  idi:repos:
+    description: >
+      Repositories that each get their own isolated checks + deploy OIDC role
+      pair. Defaults to the four idi repos in code when not set; add a repo here
+      (or to the code default) and re-deploy to provision its roles.
+
   idi:checks_sub_conditions:
     description: >
-      Branch ref patterns that may assume the checks role. Defaults to pull
-      requests and any branch ("pull_request", "ref:refs/heads/*") when not set.
+      Ref/environment patterns that may assume each repo's checks role. Each entry
+      is appended to "repo:{github_org}/{repo}:" to form the full sub condition.
+      Defaults to pull_request + any branch + dev/prod environments when not set.
 
   idi:deploy_sub_conditions:
     description: >
-      Branch ref patterns that may assume the deploy role. Each entry is appended
-      to "repo:{github_org}/*:" to form the full sub condition. Defaults to any
-      branch ("ref:refs/heads/*") when not set.
+      Ref/environment patterns that may assume each repo's deploy role. Each entry
+      is appended to "repo:{github_org}/{repo}:" to form the full sub condition.
+      Defaults to main/dev/release branches + dev/prod environments when not set.
 
