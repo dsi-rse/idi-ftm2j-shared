@@ -116,8 +116,6 @@ Only values that are identical across all repos belong here.
 ```bash
 gh variable set AWS_REGION          --org dsi-clinic --body "us-east-2"      --visibility all
 gh variable set PULUMI_STATE_BUCKET --org dsi-clinic --body "<state-bucket>" --visibility all
-# Optional ECR repo-name override (only if you don't want "<project>-<env>"):
-# gh variable set ECR_REPOSITORY_PREFIX --org dsi-clinic --body "<prefix>" --visibility all
 ```
 
 > **`PULUMI_CONFIG_PASSPHRASE` is NOT org-level.** It's the per-stack state

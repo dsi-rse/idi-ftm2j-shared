@@ -15,14 +15,11 @@ config:
     description: Name of the application
     value: "ftm2j-shared"
 
-  idi:checks_sub_conditions:
-    description: >
-      Branch ref patterns that may assume the checks role. Defaults to pull
-      requests and any branch ("pull_request", "ref:refs/heads/*") when not set.
-
-  idi:deploy_sub_conditions:
-    description: >
-      Branch ref patterns that may assume the deploy role. Each entry is appended
-      to "repo:{github_org}/*:" to form the full sub condition. Defaults to any
-      branch ("ref:refs/heads/*") when not set.
+  # idi:repos, idi:checks_sub_conditions, and idi:deploy_sub_conditions are
+  # intentionally NOT declared here. Their canonical defaults live in
+  # infra/config.py (repos: a code list; the sub conditions: derived per stack so
+  # each env's roles trust only environment:{stack}). Declaring a key in this
+  # block with no value makes it a *required* stack config and breaks `pulumi
+  # preview` when the stack file doesn't set it. Each can still be overridden per
+  # stack via `pulumi config set --path idi:<key>[0] ...` if ever needed.
 
