@@ -77,7 +77,7 @@ Prefer `pathlib` over `os.path` (`PTH`), and avoid magic numbers (`PLR2004`).
   Alpha versions are computed inside the `dev` deploy run (`<next-patch>a<run>+<sha>`)
   and are **never committed**. `main` bumps with `uv version --bump patch` and the
   `sync-dev` job merges `main` back into `dev`. The bump/sync commits are made as
-  `ftm2j-deploy-bot`; Deploy's jobs skip bot-authored head commits to break the
+  `idi-deploy-bot`; Deploy's jobs skip bot-authored head commits to break the
   deploy→commit→deploy loop (instead of `[skip ci]`, which would also suppress the
   required PR checks).
 
