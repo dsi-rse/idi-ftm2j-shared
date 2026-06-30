@@ -144,7 +144,7 @@ gh secret set DEPLOY_KEY --repo "dsi-clinic/<repo>" < ~/.ssh/<repo>_deploy_key
 
 Then add the deploy key to `dev`'s branch-protection bypass list (§2).
 
-Add the deploy key to the Bitwarden account, under `ftm2j/{repo-name}/DEPLOY_KEY`.
+Add the deploy key to the Bitwarden account, following the naming convention used by other `DEPLOY_KEY` variables.
 
 ---
 
@@ -169,11 +169,19 @@ workflows can assume them.
    ```
 2. Re-deploy the bootstrap stack **per env** (run locally — it mints the very roles
    CI uses, so CI can't deploy it). `pulumi up` against `dev` and `prod`.
+   ```
+   cd pulumi-bootstrap
+   pulumi login s3://{PULUMI_STATE_BUCKET}/ftm2j-shared/bootstrap
+   export PULUMI_CONFIG_PASSPHRASE= # check Bitwarden entry PULUMI_CONFIG_PASSPHRASE_BOOTSTRAP
+   pulumi stack select {dev|prod}
+   pulumi up
+   ```
 3. Read the new ARNs from the stack outputs — `checks_role_arns` and
    `deploy_role_arns` are maps keyed by repo:
    ```bash
    cd pulumi-bootstrap && pulumi stack output deploy_role_arns
    ```
+
    Use that repo's `checks` ARN for `AWS_ROLE_ARN_CHECKS` and its `deploy` ARN for
    `AWS_ROLE_ARN_DEPLOY` in §5.
 
@@ -181,8 +189,9 @@ workflows can assume them.
 
 ## 5. Where each value goes (routing table)
 
-Every configuration value has exactly one home. Don't guess — match the value to
-its row.
+Every configuration value has exactly one home. 
+
+For secret values (Github secrets or app secrets stored in SSM), add an entry to Bitwarden, following the naming convention used by other secrets.
 
 | Value kind | Examples | Home | How it's set |
 |---|---|---|---|
@@ -191,7 +200,7 @@ its row.
 | **Shared values** | processor bucket name, DLQ name | AWS SSM **`String`** at `/idi/<env>/shared/*` | **Nothing per repo.** Published by the shared stack; processors read via `aws.ssm.get_parameter`. |
 | **GitHub Environment secrets** (dev/prod) | `AWS_ROLE_ARN_DEPLOY`, `AWS_ROLE_ARN_CHECKS` | Per-repo, scoped to the `dev` and `prod` environments | `gh secret set <NAME> --repo "$REPO" --env dev` / `--env prod`. Values are this repo's own bootstrap role ARNs from §4. Env scope is required so the prod approval gate and per-env role ARNs work. |
 | **Pulumi state passphrase** | `PULUMI_CONFIG_PASSPHRASE` | Per-repo secret (env-scoped only if it differs dev↔prod) | `gh secret set PULUMI_CONFIG_PASSPHRASE --repo "$REPO"`. **Not org-level** — each repo's state was encrypted with its own passphrase; one org value would decrypt only one repo. |
-| **GitHub vars** | `PULUMI_STATE_BUCKET`, `AWS_REGION` (optional, defaults `us-east-2`), `PROD_INFRA_READY` | Org-level for the values identical across repos; `PROD_INFRA_READY` is per-repo | `gh variable set …`. See §6 for `PROD_INFRA_READY`. |
+| **GitHub vars** | `PULUMI_STATE_BUCKET`, `PROD_INFRA_READY` | Org-level for the values identical across repos; `PROD_INFRA_READY` is per-repo | `gh variable set …`. See §6 for `PROD_INFRA_READY`. |
 
 `idi:app_name` is **not** committed to the stack files — the workflow sets it from
 the `app-name` caller input.
