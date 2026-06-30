@@ -15,24 +15,11 @@ config:
     description: Name of the application
     value: "ftm2j-shared"
 
-  # idi:repos is intentionally NOT declared here. The canonical repo list lives
-  # in infra/config.py (read via config.get_object("repos") with a code default).
-  # Declaring it in this block with no value would make it a *required* stack
-  # config and break `pulumi preview`. It can still be overridden per stack with
-  # `pulumi config set --path idi:repos[0] ...` if ever needed.
-
-  idi:checks_sub_conditions:
-    description: >
-      Ref/environment patterns that may assume each repo's checks role. Each entry
-      is appended to "repo:{github_org}/{repo}:" to form the full sub condition.
-      Defaults are derived per stack (environment:{stack} + PR marker) in
-      infra/config.py; set this only to override that per-env scoping.
-
-  idi:deploy_sub_conditions:
-    description: >
-      Ref/environment patterns that may assume each repo's deploy role. Each entry
-      is appended to "repo:{github_org}/{repo}:" to form the full sub condition.
-      Defaults are derived per stack (dev: dev/issue refs + environment:dev; prod:
-      main/release refs + environment:prod) in infra/config.py; set this only to
-      override that per-env scoping.
+  # idi:repos, idi:checks_sub_conditions, and idi:deploy_sub_conditions are
+  # intentionally NOT declared here. Their canonical defaults live in
+  # infra/config.py (repos: a code list; the sub conditions: derived per stack so
+  # each env's roles trust only environment:{stack}). Declaring a key in this
+  # block with no value makes it a *required* stack config and breaks `pulumi
+  # preview` when the stack file doesn't set it. Each can still be overridden per
+  # stack via `pulumi config set --path idi:<key>[0] ...` if ever needed.
 
