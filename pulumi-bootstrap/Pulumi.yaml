@@ -15,11 +15,11 @@ config:
     description: Name of the application
     value: "ftm2j-shared"
 
-  idi:repos:
-    description: >
-      Repositories that each get their own isolated checks + deploy OIDC role
-      pair. Defaults to the four idi repos in code when not set; add a repo here
-      (or to the code default) and re-deploy to provision its roles.
+  # idi:repos is intentionally NOT declared here. The canonical repo list lives
+  # in infra/config.py (read via config.get_object("repos") with a code default).
+  # Declaring it in this block with no value would make it a *required* stack
+  # config and break `pulumi preview`. It can still be overridden per stack with
+  # `pulumi config set --path idi:repos[0] ...` if ever needed.
 
   idi:checks_sub_conditions:
     description: >
