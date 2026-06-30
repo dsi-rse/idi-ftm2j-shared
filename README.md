@@ -95,6 +95,8 @@ uv run ruff format .   # format
 
 ## branching strategy + versioning
 
+> Onboarding a **processor** repo onto the shared CI/CD flow? See the end-to-end checklist in [docs/onboarding-a-processor.md](docs/onboarding-a-processor.md) (workflow callers, branch protection, deploy key, value routing).
+
 Two-branch model with short-lived issue branches.
 
 ### long-lived branches
@@ -135,7 +137,7 @@ The committed version in `pyproject.toml` is always a **stable** release. Alpha 
 
 The alpha base is `uv version --bump patch --dry-run --short` (the next stable target), with `a<run-number>` for ordering and `+<short-sha>` for traceability. The `+<sha>` local segment is fine because alphas are never published to PyPI. Because the committed version is already stable, `main` uses `--bump patch` (not `--bump stable`, which would be a no-op).
 
-**Loop prevention.** The bump (`main`) and sync-back (`dev`) commits are committed as `ftm2j-deploy-bot`, and `deploy.yml`'s `version`/`deploy-pulumi` jobs skip whenever the run's head commit was committed by that bot. This breaks the deploy→commit→deploy cycle **without** `[skip ci]` — which is deliberately avoided because it suppresses *all* workflows for the commit (including the required PR checks, silently blocking dev→main PRs) and trips on the literal string appearing anywhere in a message.
+**Loop prevention.** The bump (`main`) and sync-back (`dev`) commits are committed as `idi-deploy-bot`, and `deploy.yml`'s `version`/`deploy-pulumi` jobs skip whenever the run's head commit was committed by that bot. This breaks the deploy→commit→deploy cycle **without** `[skip ci]` — which is deliberately avoided because it suppresses *all* workflows for the commit (including the required PR checks, silently blocking dev→main PRs) and trips on the literal string appearing anywhere in a message.
 
 Each successful deploy:
 
@@ -186,7 +188,7 @@ dev (0.1.6a*) ───────── PR ─────────► main
 
 #### 3. syncing main back into dev
 
-This is **automatic**: after a stable release, the `sync-dev` job in `deploy.yml` merges `main` back into `dev` (a direct push, committed by the deploy bot) so `dev`'s `pyproject.toml` reflects the released stable version. Because the push is from `ftm2j-deploy-bot`, `deploy.yml`'s guards skip it and it doesn't re-trigger Deploy on `dev`.
+This is **automatic**: after a stable release, the `sync-dev` job in `deploy.yml` merges `main` back into `dev` (a direct push, committed by the deploy bot) so `dev`'s `pyproject.toml` reflects the released stable version. Because the push is from `idi-deploy-bot`, `deploy.yml`'s guards skip it and it doesn't re-trigger Deploy on `dev`.
 
 > The `sync-dev` push requires `DEPLOY_KEY` to be allow-listed in `dev`'s branch protection.
 
@@ -218,16 +220,7 @@ Use this to redeploy Pulumi without a code change (e.g. after rotating a secret)
 
 ## branch protection rules
 
-- Default branch is set to `dev`
-- There are two rulesets: `dev` and `main`
-- Deploy keys are added to the bypass list and set to "Always allow"
-  - To set this up:
-    1. Create an SSH key pair `ssh-keygen -t ed25519 -C "deploy key for <repo>" -f ~/.ssh/<repo>_deploy_key -N ""`
-    2. Add the private key as a repository secret under `DEPLOY_KEY`
-    3. Create a new Deploy Key in the repository settings with the public key content
-- The branch targeting criteria is either set to: `dev` or `main`
-- ✅ Restrict deletions
-- ✅ Require a pull request before mergining
-- ✅ Require status checkts to pass: Lint, Test, Security, Pulumi Preview
-- ✅ Block force pushes
-- ✅ Require code scanning results; set to CodeQL security alerts "High or higher"
+Branch protection, merge-method, deploy-key, and required-check conventions are
+documented once in [docs/onboarding-a-processor.md](docs/onboarding-a-processor.md)
+(§2 Repo settings / branch protection, §3 Deploy key setup) — the same rulesets
+apply to this repo and every processor.
