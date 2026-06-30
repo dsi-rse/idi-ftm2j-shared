@@ -25,11 +25,14 @@ config:
     description: >
       Ref/environment patterns that may assume each repo's checks role. Each entry
       is appended to "repo:{github_org}/{repo}:" to form the full sub condition.
-      Defaults to pull_request + any branch + dev/prod environments when not set.
+      Defaults are derived per stack (environment:{stack} + PR marker) in
+      infra/config.py; set this only to override that per-env scoping.
 
   idi:deploy_sub_conditions:
     description: >
       Ref/environment patterns that may assume each repo's deploy role. Each entry
       is appended to "repo:{github_org}/{repo}:" to form the full sub condition.
-      Defaults to main/dev/release branches + dev/prod environments when not set.
+      Defaults are derived per stack (dev: dev/issue refs + environment:dev; prod:
+      main/release refs + environment:prod) in infra/config.py; set this only to
+      override that per-env scoping.
 

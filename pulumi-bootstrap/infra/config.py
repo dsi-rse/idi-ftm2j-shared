@@ -15,9 +15,14 @@ github_org           : GitHub organisation whose repos may assume the OIDC roles
 repos                : Repositories that each get their own isolated pair of OIDC
                        roles (checks + deploy). Add a repo here and re-deploy to
                        provision its role pair. Overridable via ``idi:repos``.
-deploy_sub_conditions: List of ``ref:refs/heads/...`` patterns appended to the
-                       per-repo prefix to form the deploy role's trust policy sub
-                       conditions. Defaults to main/dev/release + dev/prod envs.
+checks_sub_conditions: Sub patterns for the checks role's trust policy, derived
+                       per stack (``environment:{stack}`` + PR marker).
+deploy_sub_conditions: Sub patterns for the deploy role's trust policy, derived
+                       per stack: dev -> dev/issue refs + ``environment:dev``;
+                       prod -> main/release refs + ``environment:prod``. Each is
+                       appended to the per-repo prefix in iam.py. Scoping each
+                       stack to its own ``environment:`` is what keeps a dev token
+                       from assuming the prod role (and vice-versa).
 aws_region           : Deployment region from ``aws:region`` config.
 caller               : AWS caller identity (exposes ``.account_id``, ``.arn``).
 """
@@ -43,19 +48,22 @@ repos: list[str] = config.get_object("repos") or [
     "idi-sec-scraper",
 ]
 
-checks_sub_conditions: list[str] = config.get_object("checks_sub_conditions") or [
-    "pull_request",
-    "ref:refs/heads/*",
-    "environment:dev",
-    "environment:prod",
-]
-deploy_sub_conditions: list[str] = config.get_object("deploy_sub_conditions") or [
-    "ref:refs/heads/main",
-    "ref:refs/heads/dev",
-    "ref:refs/heads/release/*",
-    "environment:dev",
-    "environment:prod",
-]
+# Trust-policy sub conditions, derived PER STACK so each env's roles trust only
+# their own environment — a dev token cannot assume the prod role, or vice-versa.
+# Every job that assumes these roles sets `environment:`, so the OIDC `sub` is
+# always `repo:{org}/{repo}:environment:{stack}`; that env sub is the entry that
+# actually matches. The env-appropriate branch refs are kept for clarity/defense
+# and are disjoint across stacks (dev/issue vs main/release), so they add no
+# cross-env trust. Overridable per stack via idi:checks/deploy_sub_conditions.
+if stack_name == "prod":
+    _default_checks = ["pull_request", "environment:prod"]
+    _default_deploy = ["ref:refs/heads/main", "ref:refs/heads/release/*", "environment:prod"]
+else:
+    _default_checks = ["pull_request", "environment:dev"]
+    _default_deploy = ["ref:refs/heads/dev", "ref:refs/heads/issue-*", "environment:dev"]
+
+checks_sub_conditions: list[str] = config.get_object("checks_sub_conditions") or _default_checks
+deploy_sub_conditions: list[str] = config.get_object("deploy_sub_conditions") or _default_deploy
 
 aws_config = pulumi.Config("aws")
 aws_region = aws_config.require("region")

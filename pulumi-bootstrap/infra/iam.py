@@ -4,15 +4,15 @@ One pair of roles is provisioned **per repository** (see ``config.repos``) so ea
 repo's workflows assume only their own role ARNs — there is no shared org-wide role.
 For every repo, two roles, one per trust boundary:
 
-  1. checks  — assumed on pull requests; read-only access for `pulumi preview`
-               and other CI checks.
-  2. deploy  — assumed on main/dev/release branches; full deploy permissions
-               for `pulumi up` against the main `idi` stack.
+  1. checks  — assumed by `pulumi preview` on pull requests; read-only access.
+  2. deploy  — assumed by `pulumi up` on this env's pushes; full deploy permissions.
 
 Each trust policy pins the OIDC ``sub`` to ``repo:{org}/{repo}:...`` so only that
-repository can assume the role. The permission policy documents are identical
-across repos (scoped to the shared ``idi-*`` resource namespace); isolation is at
-the trust boundary (who can assume), expressed through distinct role ARNs.
+repository can assume the role, and (via ``config.*_sub_conditions``) to this
+stack's own ``environment:{stack}`` so a dev token cannot assume the prod role and
+vice-versa. The permission policy documents are identical across repos (scoped to
+the shared ``idi-*`` resource namespace); isolation is at the trust boundary (who
+can assume), expressed through distinct per-repo, per-env role ARNs.
 
 Exposes ``checks_roles`` / ``deploy_roles``: dicts mapping repo name -> Role.
 """
@@ -561,7 +561,7 @@ def _repo_roles(repo: str) -> tuple[aws.iam.Role, aws.iam.Role]:
     deploy_role = aws.iam.Role(
         f"idi-role-github-deploy-{repo}",
         name=f"{prefix}-deploy",
-        description=f"Full deploy access for pulumi up on {repo} main/dev/release branches",
+        description=f"Full deploy access for pulumi up on {repo} ({config.stack_name})",
         assume_role_policy=_trust_policy(
             [f"{repo_prefix}:{sub}" for sub in config.deploy_sub_conditions]
         ),
