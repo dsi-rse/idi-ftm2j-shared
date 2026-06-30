@@ -1,10 +1,17 @@
 # Composition: post-merge pipeline for the Docker processors (the 3 siblings).
 #
-#   version ─┬─► docker ─► sync-ecr ─► deploy-pulumi
-#            └─► sync-dev             (main only: merge main->dev)
+#   version ─┬─► docker ─► deploy-pulumi ─► sync-ecr
+#            └─► sync-dev                  (main only: merge main->dev)
 #
-# No per-filter change detection: the chain is LINEAR (deploy-pulumi points the
-# ECS task def at the image docker just built and sync-ecr pushed), so gating
+# deploy-pulumi runs BEFORE sync-ecr: deploy-pulumi creates the ECR repository,
+# so on a fresh environment the repo must exist before sync-ecr can push to it.
+# This leaves a gap — the ECS task def points at an image tag that sync-ecr only
+# pushes afterward — but the processors are cron-scheduled and pull lazily, so a
+# deploy lands the new tag before the next scheduled run. Accepting that gap is
+# what makes deploying to a brand-new environment work without manual bootstrap.
+#
+# No per-filter change detection: the chain is LINEAR (each link consumes the
+# prior — docker builds, deploy-pulumi provisions, sync-ecr pushes), so gating
 # individual links on path filters would break it — a code-only change would
 # build an image that never deploys; an infra-only change couldn't deploy. The
 # full chain runs on every non-doc push; doc-only pushes are excluded by the
@@ -22,7 +29,7 @@
 # deploy bot's own bump/sync commits.
 #
 # Prod is gated on PROD_INFRA_READY: a main push still versions, releases, and
-# pushes the image to GHCR, but the ECR sync and deploy-pulumi are skipped until
+# pushes the image to GHCR, but deploy-pulumi (and the ECR sync) is skipped until
 # the processor flips its var to 'true'.
 name: pipeline-docker
 
@@ -61,7 +68,7 @@ on:
         default: "idi-deploy-bot@users.noreply.github.com"
     secrets:
       # AWS_ROLE_ARN_DEPLOY is environment-scoped — not declared here; the
-      # sync-ecr and deploy-pulumi jobs resolve it via their `environment:`.
+      # deploy-pulumi and sync-ecr jobs resolve it via their `environment:`.
       DEPLOY_KEY:
         required: true
       PULUMI_CONFIG_PASSPHRASE:
@@ -203,15 +210,54 @@ jobs:
               -m "Merge main into dev (stable v${{ needs.version.outputs.version }})"
           git push origin dev
 
-  # ECR sync runs BEFORE deploy-pulumi: deploy-pulumi points the ECS task def at
-  # the image tag, so the tag must already be in ECR. (It used to run after, only
-  # surviving because the processors are cron-scheduled and pull lazily.) Carries
-  # its own PROD_INFRA_READY guard — it no longer inherits the skip transitively
-  # from deploy-pulumi.
+  deploy-pulumi:
+    name: Deploy Pulumi (${{ needs.version.outputs.deploy_env }})
+    needs: [version, docker]
+    # Always on dev; on prod only once the processor marks its infra ready.
+    if: needs.version.outputs.deploy_env != 'prod' || vars.PROD_INFRA_READY == 'true'
+    runs-on: ubuntu-latest
+    environment: ${{ needs.version.outputs.deploy_env }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup uv
+        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
+        with:
+          version: "0.11.8"
+          python-version: ${{ inputs.python-version }}
+      - name: Install dependencies
+        run: uv sync --group pulumi
+        working-directory: ${{ inputs.project-dir }}
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEPLOY }}
+          role-session-name: idi-github-ci
+          aws-region: ${{ env.AWS_REGION }}
+      - name: Configure Pulumi
+        working-directory: ${{ inputs.project-dir }}/${{ inputs.pulumi-dir }}
+        run: |
+          pulumi login s3://${{ vars.PULUMI_STATE_BUCKET }}
+          pulumi stack select ${{ needs.version.outputs.deploy_env }} 2>/dev/null || pulumi stack init ${{ needs.version.outputs.deploy_env }}
+          pulumi config set aws:region ${{ env.AWS_REGION }}
+          pulumi config set idi:app_name ${{ inputs.app-name }}
+      - name: Pulumi deploy
+        working-directory: ${{ inputs.project-dir }}/${{ inputs.pulumi-dir }}
+        run: uv run pulumi up --yes
+
+  # ECR sync runs AFTER deploy-pulumi: deploy-pulumi creates the ECR repository,
+  # so the repo must exist before we can push to it (the chicken-and-egg that
+  # makes fresh-environment bootstrap work). The skip on prod-not-ready is
+  # inherited transitively — a skipped deploy-pulumi skips its dependants — so no
+  # separate PROD_INFRA_READY guard is needed here.
   sync-ecr:
     name: Sync ${{ matrix.image.name }} to ECR (${{ needs.version.outputs.deploy_env }})
-    needs: [version, docker]
-    if: needs.version.outputs.deploy_env != 'prod' || vars.PROD_INFRA_READY == 'true'
+    needs: [version, docker, deploy-pulumi]
     runs-on: ubuntu-latest
     environment: ${{ needs.version.outputs.deploy_env }}
     permissions:
@@ -250,43 +296,3 @@ jobs:
           docker tag "${GHCR_IMG}:${{ needs.version.outputs.version }}" "${ECR_URI}:latest"
           docker push "${ECR_URI}:${{ needs.version.outputs.version }}"
           docker push "${ECR_URI}:latest"
-
-  deploy-pulumi:
-    name: Deploy Pulumi (${{ needs.version.outputs.deploy_env }})
-    needs: [version, docker, sync-ecr]
-    # Always on dev; on prod only once the processor marks its infra ready.
-    if: needs.version.outputs.deploy_env != 'prod' || vars.PROD_INFRA_READY == 'true'
-    runs-on: ubuntu-latest
-    environment: ${{ needs.version.outputs.deploy_env }}
-    permissions:
-      id-token: write
-      contents: read
-    env:
-      PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-      AWS_REGION: ${{ vars.AWS_REGION || 'us-east-2' }}
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup uv
-        uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
-        with:
-          version: "0.11.8"
-          python-version: ${{ inputs.python-version }}
-      - name: Install dependencies
-        run: uv sync --group pulumi
-        working-directory: ${{ inputs.project-dir }}
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN_DEPLOY }}
-          role-session-name: idi-github-ci
-          aws-region: ${{ env.AWS_REGION }}
-      - name: Configure Pulumi
-        working-directory: ${{ inputs.project-dir }}/${{ inputs.pulumi-dir }}
-        run: |
-          pulumi login s3://${{ vars.PULUMI_STATE_BUCKET }}
-          pulumi stack select ${{ needs.version.outputs.deploy_env }} 2>/dev/null || pulumi stack init ${{ needs.version.outputs.deploy_env }}
-          pulumi config set aws:region ${{ env.AWS_REGION }}
-          pulumi config set idi:app_name ${{ inputs.app-name }}
-      - name: Pulumi deploy
-        working-directory: ${{ inputs.project-dir }}/${{ inputs.pulumi-dir }}
-        run: uv run pulumi up --yes
