@@ -191,7 +191,7 @@ its row.
 | **Shared values** | processor bucket name, DLQ name | AWS SSM **`String`** at `/idi/<env>/shared/*` | **Nothing per repo.** Published by the shared stack; processors read via `aws.ssm.get_parameter`. |
 | **GitHub Environment secrets** (dev/prod) | `AWS_ROLE_ARN_DEPLOY`, `AWS_ROLE_ARN_CHECKS` | Per-repo, scoped to the `dev` and `prod` environments | `gh secret set <NAME> --repo "$REPO" --env dev` / `--env prod`. Values are this repo's own bootstrap role ARNs from §4. Env scope is required so the prod approval gate and per-env role ARNs work. |
 | **Pulumi state passphrase** | `PULUMI_CONFIG_PASSPHRASE` | Per-repo secret (env-scoped only if it differs dev↔prod) | `gh secret set PULUMI_CONFIG_PASSPHRASE --repo "$REPO"`. **Not org-level** — each repo's state was encrypted with its own passphrase; one org value would decrypt only one repo. |
-| **GitHub vars** | `PULUMI_STATE_BUCKET`, `AWS_REGION` (optional, defaults `us-east-2`), `ECR_REPOSITORY_PREFIX` (optional override of `<project>-<env>`), `PROD_INFRA_READY` | Org-level for the values identical across repos; `PROD_INFRA_READY` is per-repo | `gh variable set …`. See §6 for `PROD_INFRA_READY`. |
+| **GitHub vars** | `PULUMI_STATE_BUCKET`, `AWS_REGION` (optional, defaults `us-east-2`), `PROD_INFRA_READY` | Org-level for the values identical across repos; `PROD_INFRA_READY` is per-repo | `gh variable set …`. See §6 for `PROD_INFRA_READY`. |
 
 `idi:app_name` is **not** committed to the stack files — the workflow sets it from
 the `app-name` caller input.

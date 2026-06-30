@@ -286,7 +286,10 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Re-tag and push to ECR
         env:
-          ECR_PREFIX: ${{ vars.ECR_REPOSITORY_PREFIX || format('{0}-{1}', needs.version.outputs.pulumi_project, needs.version.outputs.deploy_env) }}
+          # ECR repo name follows the Pulumi naming convention
+          # {project}-{stack}-{app}-{image}; deploy-pulumi creates the repo under
+          # exactly this prefix, so sync-ecr re-tags to the same name.
+          ECR_PREFIX: ${{ format('{0}-{1}', needs.version.outputs.pulumi_project, needs.version.outputs.deploy_env) }}
         run: |
           ECR_REPO="${ECR_PREFIX}-${{ inputs.app-name }}-${{ matrix.image.name }}"
           ECR_URI="${{ steps.ecr-login.outputs.registry }}/$ECR_REPO"
