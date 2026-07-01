@@ -270,6 +270,12 @@ _DEPLOY_POLICY_DOC = json.dumps(
                     "iam:CreateRole",
                     "iam:DeleteRole",
                     "iam:UpdateRole",
+                    # Description-only edits go through the legacy
+                    # UpdateRoleDescription API, not UpdateRole. Without this a
+                    # processor `pulumi up` that changes a Role's description
+                    # fails with AccessDenied even though the role can already be
+                    # created/deleted/rewritten here.
+                    "iam:UpdateRoleDescription",
                     "iam:PutRolePolicy",
                     "iam:DeleteRolePolicy",
                     "iam:AttachRolePolicy",
