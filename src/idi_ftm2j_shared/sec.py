@@ -199,8 +199,7 @@ def _load_filing(bucket: str, key: str) -> ScrapedFiling | None:
     if not data:
         return None
     documents = [
-        ScrapedDocument(**_only_known_fields(ScrapedDocument, d))
-        for d in data.pop("documents", [])
+        ScrapedDocument(**_only_known_fields(ScrapedDocument, d)) for d in data.pop("documents", [])
     ]
     return ScrapedFiling(**{**_only_known_fields(ScrapedFiling, data), "documents": documents})
 
