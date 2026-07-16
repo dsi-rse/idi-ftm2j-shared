@@ -55,7 +55,6 @@ def _make_filing(
         accession_number=accession_number,
         form_type=form_type,
         filing_date=filing_date,
-        last_scraped_at="2024-01-16T00:00:00",
         index_url="https://www.sec.gov/cgi-bin/browse-edgar?action=getcompany",
         company_name="Acme Corp",
         failure_reason=failure_reason,
@@ -399,6 +398,43 @@ class TestLoadFiling:
         _load_filing(BUCKET, "form/date/cik/acc/manifest.json")
 
         s3.get_object.assert_called_once_with(Bucket=BUCKET, Key="form/date/cik/acc/manifest.json")
+
+    def test_tolerates_legacy_manifest_with_last_scraped_at(self, mocker):
+        # Old manifests carry the removed filing-level last_scraped_at and no
+        # per-document date_scraped; both must deserialise cleanly.
+        s3 = _mock_s3(mocker)
+        legacy = {
+            "cik": "001",
+            "accession_number": "acc",
+            "form_type": "10-K",
+            "filing_date": "2024-01-15",
+            "last_scraped_at": "2024-01-16T00:00:00",
+            "index_url": "https://sec.gov/index.htm",
+            "company_name": "Acme Corp",
+            "documents": [{"filename": "doc.htm", "url": "https://sec.gov/doc.htm"}],
+        }
+        s3.get_object.return_value = {"Body": MagicMock(read=lambda: json.dumps(legacy).encode())}
+
+        result = _load_filing(BUCKET, "any/key")
+
+        assert result is not None
+        assert not hasattr(result, "last_scraped_at")
+        assert result.documents[0].date_scraped == ""
+
+    def test_reads_per_document_date_scraped(self, mocker):
+        s3 = _mock_s3(mocker)
+        doc = ScrapedDocument(
+            filename="doc.htm",
+            url="https://sec.gov/doc.htm",
+            date_scraped="2026-05-16T04:25:07.912991+00:00",
+        )
+        filing = _make_filing(documents=[doc])
+        s3.get_object.return_value = _get_object_ok(filing)
+
+        result = _load_filing(BUCKET, "any/key")
+
+        assert result is not None
+        assert result.documents[0].date_scraped == "2026-05-16T04:25:07.912991+00:00"
 
 
 # ---------------------------------------------------------------------------
