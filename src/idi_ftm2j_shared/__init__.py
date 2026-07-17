@@ -1,4 +1,4 @@
-"""Shared runtime utilities for FTM2J pipeline processors."""
+"""Shared utilities for FTM2J pipeline processors."""
 
 from importlib.metadata import version
 
