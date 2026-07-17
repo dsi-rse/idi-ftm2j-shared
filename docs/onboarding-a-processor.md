@@ -7,8 +7,7 @@ Copy-down checklist for putting a **processor** repo (e.g. `idi-corporate-struct
 
 Scope: **processors only.** The PyPI flow (`pipeline-pypi.yml` / this repo's own
 `deploy.yml`) is out of scope. Org is assumed to be `dsi-clinic`; adjust `gh`
-commands to your auth/admin scope. For the broader value-routing rationale and the
-one-time org/AWS bootstrap, see the [migration runbook](ci-cd-migration.md).
+commands to your auth/admin scope.
 
 Work top to bottom. A repo is fully onboarded when a `dev` push releases + pushes
 to GHCR + deploys the dev stack, a `dev`→`main` PR releases a stable version and
@@ -21,8 +20,7 @@ auto-syncs back to `dev`, and prod is flipped on once its AWS infra exists.
 Both files are thin callers pinned to an **exact released tag** of
 `idi-ftm2j-shared` — never `@main` or a branch. The shared workflows are versioned
 like code: every `.github/**` change cuts a new immutable `vX.Y.Z`, and your repo's
-behavior never changes until you bump the pin. Find the latest tag with
-`gh release list -R dsi-clinic/idi-ftm2j-shared` and pin it.
+behavior never changes until you bump the pin.
 
 `.github/workflows/deploy.yml` (post-merge: version, build/push image, deploy):
 
@@ -45,7 +43,7 @@ jobs:
     uses: dsi-clinic/idi-ftm2j-shared/.github/workflows/pipeline-docker.yml@vX.Y.Z  # pin an exact release
     secrets: inherit
     with:
-      app-name: <app-name>
+      app-name: <app-name>  # e.g. corporate-structure
       images: '[{"name":"orchestrator","dockerfile":"dockerfiles/Dockerfile.orchestrator"}]'
 ```
 
@@ -70,11 +68,11 @@ jobs:
     uses: dsi-clinic/idi-ftm2j-shared/.github/workflows/pipeline-checks.yml@vX.Y.Z  # pin an exact release
     secrets: inherit
     with:
-      app-name: <app-name>
-      cov-package: <cov-package>
+      app-name: <app-name>  # e.g. corporate-structure
+      cov-package: <cov-package>  # e.g. idi_corporate_structure
 ```
 
-`secrets: inherit` forwards every repo/org/environment secret; do **not** list
+`secrets: inherit` forwards every Github repo/org/environment secret; do **not** list
 secrets individually (env-scoped secrets like the role ARNs can't be re-declared as
 `workflow_call` secrets — they resolve because the nested jobs set `environment:`).
 
@@ -86,19 +84,14 @@ multiple space-separated. Per-repo values:
 |---|---|---|---|
 | idi-corporate-structure | `corporate-structure` | `orchestrator` / `dockerfiles/Dockerfile.orchestrator` | `idi_corporate_structure` |
 | idi-company-info | `company-info` | `orchestrator` / `dockerfiles/Dockerfile.orchestrator` | `idi_company_info` |
-| idi-sec-scraper | `sec-scraper` | `scraper` / `dockerfiles/Dockerfile.scraper` | `idi_sec_scraper` |
-
-When migrating an existing repo, **delete** the old per-image build jobs, any
-`[skip ci]` commit step, the `${GITHUB_ACTOR}` git identity, and every
-`startsWith(github.ref, 'refs/heads/issue-')` condition — the shared workflows
-replace all of it.
+| idi-sec-scraper | `sec-scraper` | `orchestrator` / `dockerfiles/Dockerfile.scraper` | `idi_sec_scraper` |
 
 ---
 
 ## 2. Repo settings / branch protection
 
 Default branch is **`dev`**. Two rulesets, `dev` and `main`, with **different**
-allowed merge methods — this is deliberate:
+allowed merge methods:
 
 | Branch | Allowed merge method | Why |
 |---|---|---|
@@ -114,13 +107,6 @@ Required on **both** rulesets (PRs into `dev` and into `main`):
 - ✅ Block force pushes
 - Deploy key on the **bypass** list, set to "Always allow" (see §3) — **required on `dev`**: the `sync-dev` job direct-pushes the `main`→`dev` merge-back with no PR, and branch protection's "require a pull request before merging" otherwise rejects it. (Deploy keys are not subject to "restrict who can push", but they *are* blocked by the PR requirement.)
 
-Verify the dev push will be accepted before flipping the repo onto the shared flow:
-
-```bash
-REPO=dsi-clinic/<repo>
-gh api "repos/$REPO/branches/dev/protection" 2>/dev/null || echo "no protection (push allowed)"
-```
-
 ---
 
 ## 3. Deploy key setup
@@ -128,7 +114,7 @@ gh api "repos/$REPO/branches/dev/protection" 2>/dev/null || echo "no protection 
 The `DEPLOY_KEY` is what lets the pipeline push past branch protection for the
 version-bump commit (`main`), the tag + GitHub Release, and the `main`→`dev` sync
 push. The commits are authored as `idi-deploy-bot`, and the pipeline's
-committer-identity guard skips bot-authored head commits — that (not `[skip ci]`)
+committer-identity guard skips bot-authored head commits — that
 is what breaks the deploy→commit→deploy loop.
 
 ```bash
@@ -142,7 +128,7 @@ ssh-keygen -t ed25519 -C "deploy key for <repo>" -f ~/.ssh/<repo>_deploy_key -N 
 gh secret set DEPLOY_KEY --repo "dsi-clinic/<repo>" < ~/.ssh/<repo>_deploy_key
 ```
 
-Then add the deploy key to `dev`'s branch-protection bypass list (§2).
+Then add the deploy key to `dev` branch ruleset's branch-protection bypass list in the repository settings: `Add bypass` > `Deploy keys` (§2).
 
 Add the deploy key to the Bitwarden account, following the naming convention used by other `DEPLOY_KEY` variables.
 
@@ -184,6 +170,8 @@ workflows can assume them.
 
    Use that repo's `checks` ARN for `AWS_ROLE_ARN_CHECKS` and its `deploy` ARN for
    `AWS_ROLE_ARN_DEPLOY` in §5.
+  
+Add these values to Bitwarden.
 
 ---
 
@@ -196,7 +184,7 @@ For secret values (Github secrets or app secrets stored in SSM), add an entry to
 | Value kind | Examples | Home | How it's set |
 |---|---|---|---|
 | **Non-secret per-processor knobs** | `cpu`, `memory`, `cron_*`, `schedule_enabled`, model, sample size, `input_file`, batch sizes | Committed `pulumi/Pulumi.dev.yaml` + `pulumi/Pulumi.prod.yaml` (`idi:*` keys) | Commit to git. All values are **strings** — quote numbers (`"1024"`) and booleans (`"true"`). Keep `cron_*`/`schedule_enabled` per-env if prod should run on a different cadence than dev. |
-| **Genuine secrets** | API keys (`openai_api_key`, `permid_api_key`, …) | AWS SSM **`SecureString`** at `/idi/<env>/<app>/secrets/*` | Pulumi creates a placeholder; set the real value out-of-band: `aws ssm put-parameter --name /idi/<env>/<app>/secrets/<key> --type SecureString --value '<v>' --overwrite`. **Repos are PUBLIC — never commit these, even encrypted.** |
+| **Genuine secrets** | API keys (`openai_api_key`, `permid_api_key`, …) | AWS SSM **`SecureString`** at `/idi/<env>/<app>/secrets/*` | Pulumi creates a placeholder; set the real value after the parameter is created by the first deploy: `aws ssm put-parameter --name /idi/<env>/<app>/secrets/<key> --type SecureString --value '<v>' --overwrite`. **Repos are PUBLIC — never commit these, even encrypted. Secrets should also be stored in Bitwarden.** |
 | **Shared values** | processor bucket name, DLQ name | AWS SSM **`String`** at `/idi/<env>/shared/*` | **Nothing per repo.** Published by the shared stack; processors read via `aws.ssm.get_parameter`. |
 | **GitHub Environment secrets** (dev/prod) | `AWS_ROLE_ARN_DEPLOY`, `AWS_ROLE_ARN_CHECKS` | Per-repo, scoped to the `dev` and `prod` environments | `gh secret set <NAME> --repo "$REPO" --env dev` / `--env prod`. Values are this repo's own bootstrap role ARNs from §4. Env scope is required so the prod approval gate and per-env role ARNs work. |
 | **Pulumi state passphrase** | `PULUMI_CONFIG_PASSPHRASE` | Per-repo secret (env-scoped only if it differs dev↔prod) | `gh secret set PULUMI_CONFIG_PASSPHRASE --repo "$REPO"`. **Not org-level** — each repo's state was encrypted with its own passphrase; one org value would decrypt only one repo. |
@@ -205,15 +193,18 @@ For secret values (Github secrets or app secrets stored in SSM), add an entry to
 `idi:app_name` is **not** committed to the stack files — the workflow sets it from
 the `app-name` caller input.
 
-Environments: processors get **`dev`** and **`prod`** only (no `release` — that's
-PyPI). Add a required-reviewer approval gate on `prod`:
+Github environments: processors get **`dev`** and **`prod`** only. Each processor should have the following secrets and variables in Github:
 
-```bash
-REPO=dsi-clinic/<repo>
-gh api -X PUT "repos/$REPO/environments/dev"
-gh api -X PUT "repos/$REPO/environments/prod" \
-  -F "reviewers[][type]=User" -F "reviewers[][id]=<REVIEWER_USER_ID>"
-```
+- **Secrets**:
+  - **Environment**: `AWS_ROLE_ARN_CHECKS`, `AWS_ROLE_ARN_DEPLOY`
+  - **Repository**: `DEPLOY_KEY`, `PULUMI_CONFIG_PASSPHRASE`
+- **Variables**:
+  - **Environment**: `PULUMI_STATE_BUCKET`
+  - **Repository**: `PROD_INFRA_READY`
+  - **Organization**: `AWS_REGION`
+
+Anything other configurations should either be the committed `pulumi/Pulumi.{env}.yaml` files (if non-secret) or stored in SSM and managed by Pulumi (if secret).
+
 
 ---
 
