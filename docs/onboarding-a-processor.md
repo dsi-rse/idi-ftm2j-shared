@@ -5,8 +5,8 @@ Copy-down checklist for putting a **processor** repo (e.g. `idi-corporate-struct
 [`pipeline-docker.yml`](../.github/workflows/pipeline-docker.yml) +
 [`pipeline-checks.yml`](../.github/workflows/pipeline-checks.yml).
 
-Scope: **processors only.** The PyPI flow (`pipeline-pypi.yml` / this repo's own
-`deploy.yml`) is out of scope. Org is assumed to be `dsi-clinic`; adjust `gh`
+Scope: **processors only.** This repo's own PyPI flow (`deploy.yml`, which is
+self-contained and not shared) is out of scope. Org is assumed to be `dsi-clinic`; adjust `gh`
 commands to your auth/admin scope.
 
 Work top to bottom. A repo is fully onboarded when a `dev` push releases + pushes
