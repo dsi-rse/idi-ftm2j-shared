@@ -26,17 +26,21 @@ class ScrapedDocument:
     type: str = ""
     seq: str = ""
     s3_key: str = ""
+    date_scraped: str = ""
 
 
 @dataclass
 class ScrapedFiling:
-    """Manifest of a scraped filing written to S3 as manifest.json."""
+    """Manifest of a scraped filing written to S3 as manifest.json.
+
+    Per-document scrape timestamps live on each :class:`ScrapedDocument`
+    (``date_scraped``); there is no filing-level scrape timestamp.
+    """
 
     cik: str
     accession_number: str
     form_type: str
     filing_date: str
-    last_scraped_at: str
     index_url: str
     company_name: str
     report_date: str = ""

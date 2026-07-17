@@ -4,6 +4,7 @@
 import os
 import re
 from collections.abc import Iterator
+from dataclasses import fields
 from datetime import date, timedelta
 
 # Application imports
@@ -178,6 +179,17 @@ def _manifest_key(form_type: str, filing_date: date, cik: str, accession_number:
     return f"{s3_prefix(form_type, filing_date, cik, accession_number)}/manifest.json"
 
 
+def _only_known_fields(cls: type, data: dict) -> dict:
+    """Keep only keys matching ``cls`` dataclass fields.
+
+    Tolerates manifests written by older/newer scrapers: unknown keys (e.g. the
+    removed ``last_scraped_at``) are dropped, and missing keys fall back to the
+    dataclass defaults.
+    """
+    allowed = {f.name for f in fields(cls)}
+    return {k: v for k, v in data.items() if k in allowed}
+
+
 def _load_filing(bucket: str, key: str) -> ScrapedFiling | None:
     """Load and deserialise a manifest.json from S3.
 
@@ -186,8 +198,10 @@ def _load_filing(bucket: str, key: str) -> ScrapedFiling | None:
     data = load_json(f"s3://{bucket}/{key}", return_type="dict")
     if not data:
         return None
-    documents = [ScrapedDocument(**d) for d in data.pop("documents", [])]
-    return ScrapedFiling(**{**data, "documents": documents})
+    documents = [
+        ScrapedDocument(**_only_known_fields(ScrapedDocument, d)) for d in data.pop("documents", [])
+    ]
+    return ScrapedFiling(**{**_only_known_fields(ScrapedFiling, data), "documents": documents})
 
 
 def get_filing(
