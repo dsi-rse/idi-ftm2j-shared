@@ -50,6 +50,16 @@ _SEARCH_BY_FILING_DATE = "filing_date"
 _SEARCH_BY_SCRAPED_DATE = "scraped_date"
 _SEARCH_MODES = (_SEARCH_BY_FILING_DATE, _SEARCH_BY_SCRAPED_DATE)
 
+# Columns the query path reads from manifest.parquet: the filing key plus both
+# date columns. Projecting to these avoids decoding the rest of the file.
+_MANIFEST_QUERY_COLUMNS = [
+    "form_type",
+    "filing_date",
+    "cik",
+    "accession_number",
+    "date_scraped",
+]
+
 
 def s3_prefix(
     form_type: str,
@@ -251,16 +261,57 @@ def get_filing(
     )
 
 
-def _read_manifest_parquet(bucket: str) -> pd.DataFrame | None:
+def _manifest_read_filters(
+    form_types: list[str],
+    start_date: date,
+    end_date: date,
+    search_by: str,
+) -> list[tuple]:
+    """Build pyarrow ``filters=`` predicates matching the query.
+
+    Applied while decoding the in-memory parquet so non-matching row groups and
+    rows are dropped before materialising the DataFrame. These mirror the
+    authoritative filtering in :func:`_matching_manifest_rows` (half-open upper
+    bound, tz-aware ``date_scraped``); the row-level pass there stays the source
+    of truth, so any predicate mismatch can only cost work, never correctness.
+    """
+    predicates: list[tuple] = [("form_type", "in", form_types)]
+    if search_by == _SEARCH_BY_SCRAPED_DATE:
+        lower = pd.Timestamp(start_date, tz="UTC")
+        upper = pd.Timestamp(end_date, tz="UTC") + pd.Timedelta(days=1)
+        predicates += [("date_scraped", ">=", lower), ("date_scraped", "<", upper)]
+    else:
+        # filing_date is stored as an ISO "YYYY-MM-DD" string; lexicographic
+        # comparison is chronological, and "<= end" == "< end+1day" at day
+        # granularity, matching the half-open filter in _matching_manifest_rows.
+        predicates += [
+            ("filing_date", ">=", start_date.isoformat()),
+            ("filing_date", "<=", end_date.isoformat()),
+        ]
+    return predicates
+
+
+def _read_manifest_parquet(
+    bucket: str,
+    filters: list[tuple] | None = None,
+) -> pd.DataFrame | None:
     """Read the bucket-level ``manifest.parquet`` query index into a DataFrame.
 
     Returns ``None`` when the parquet does not exist (nothing has been scraped
     yet, or the bucket predates the manifest index).
+
+    The full object is fetched (no range-request pushdown on a ``BytesIO``
+    read), but ``columns=`` and ``filters=`` are applied during decode so only
+    the projected columns of matching rows are decompressed and materialised.
     """
     body = load_content(f"s3://{bucket}/{_MANIFEST_PARQUET_KEY}")
     if not body:
         return None
-    return pd.read_parquet(io.BytesIO(body))
+    return pd.read_parquet(
+        io.BytesIO(body),
+        columns=_MANIFEST_QUERY_COLUMNS,
+        filters=filters,
+    )
 
 
 def iter_filings_by_form_type(
@@ -366,7 +417,8 @@ def _iter_filings_by_form_type(
     if isinstance(form_types, str):
         form_types = [form_types]
 
-    df = _read_manifest_parquet(bucket)
+    filters = _manifest_read_filters(form_types, start_date, end_date, search_by)
+    df = _read_manifest_parquet(bucket, filters=filters)
     if df is None or df.empty:
         return
 
