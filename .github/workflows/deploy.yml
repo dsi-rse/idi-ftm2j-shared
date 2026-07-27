@@ -136,6 +136,12 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
+          # Build the tagged/bumped commit, NOT github.sha. The `version` job
+          # commits the bump *after* the triggering commit, so github.sha still
+          # holds the previous version string — building it stamps new code with
+          # the old version (PyPI ends up one release behind the GitHub tag).
+          # The tag is pushed by `version` before this job starts (needs edge).
+          ref: v${{ needs.version.outputs.version }}
           persist-credentials: false
       - name: Setup uv
         uses: astral-sh/setup-uv@38f3f104447c67c051c4a08e39b64a148898af3a  # v4
