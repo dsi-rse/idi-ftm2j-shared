@@ -17,6 +17,8 @@ readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
     "boto3>=1.42.70",
+    "pandas>=2.2.0",
+    "pyarrow>=15.0.0",
     "requests>=2.33.1",
     "smart-open[s3]>=7.6.0",
     "tqdm>=4.67.3",

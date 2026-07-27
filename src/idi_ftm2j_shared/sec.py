@@ -1,16 +1,20 @@
 """Provides SEC EDGAR data access utilities."""
 
 # Standard library imports
+import io
 import os
 import re
 from collections.abc import Iterator
 from dataclasses import fields
 from datetime import date, timedelta
 
+# Third party imports
+import pandas as pd
+
 # Application imports
 from idi_ftm2j_shared.api import SecClient
 from idi_ftm2j_shared.logs import get_logger
-from idi_ftm2j_shared.storage import _get_s3_client, load_json
+from idi_ftm2j_shared.storage import load_content, load_json
 from idi_ftm2j_shared.types import DiscoveredFiling, ScrapedDocument, ScrapedFiling
 
 _logger = get_logger(__name__)
@@ -36,6 +40,25 @@ _FIELDS_RE = re.compile(
 _S3_ROOT = "sec"
 # Characters not in this set are replaced with "_" when used in S3 keys.
 _SAFE_RE = re.compile(r"[^0-9a-zA-Z!._*'()-]")
+
+# Bucket-level manifest written by the scraper: one row per scraped document,
+# used here as a query index for iter_filings_by_form_type.
+_MANIFEST_PARQUET_KEY = f"{_S3_ROOT}/manifest.parquet"
+
+# Search modes accepted by iter_filings_by_form_type.
+_SEARCH_BY_FILING_DATE = "filing_date"
+_SEARCH_BY_SCRAPED_DATE = "scraped_date"
+_SEARCH_MODES = (_SEARCH_BY_FILING_DATE, _SEARCH_BY_SCRAPED_DATE)
+
+# Columns the query path reads from manifest.parquet: the filing key plus both
+# date columns. Projecting to these avoids decoding the rest of the file.
+_MANIFEST_QUERY_COLUMNS = [
+    "form_type",
+    "filing_date",
+    "cik",
+    "accession_number",
+    "date_scraped",
+]
 
 
 def s3_prefix(
@@ -238,20 +261,85 @@ def get_filing(
     )
 
 
+def _manifest_read_filters(
+    form_types: list[str],
+    start_date: date,
+    end_date: date,
+    search_by: str,
+) -> list[tuple]:
+    """Build pyarrow ``filters=`` predicates matching the query.
+
+    Applied while decoding the in-memory parquet so non-matching row groups and
+    rows are dropped before materialising the DataFrame. These mirror the
+    authoritative filtering in :func:`_matching_manifest_rows` (half-open upper
+    bound, tz-aware ``date_scraped``); the row-level pass there stays the source
+    of truth, so any predicate mismatch can only cost work, never correctness.
+    """
+    predicates: list[tuple] = [("form_type", "in", form_types)]
+    if search_by == _SEARCH_BY_SCRAPED_DATE:
+        lower = pd.Timestamp(start_date, tz="UTC")
+        upper = pd.Timestamp(end_date, tz="UTC") + pd.Timedelta(days=1)
+        predicates += [("date_scraped", ">=", lower), ("date_scraped", "<", upper)]
+    else:
+        # filing_date is stored as an ISO "YYYY-MM-DD" string; lexicographic
+        # comparison is chronological, and "<= end" == "< end+1day" at day
+        # granularity, matching the half-open filter in _matching_manifest_rows.
+        predicates += [
+            ("filing_date", ">=", start_date.isoformat()),
+            ("filing_date", "<=", end_date.isoformat()),
+        ]
+    return predicates
+
+
+def _read_manifest_parquet(
+    bucket: str,
+    filters: list[tuple] | None = None,
+) -> pd.DataFrame | None:
+    """Read the bucket-level ``manifest.parquet`` query index into a DataFrame.
+
+    Returns ``None`` when the parquet does not exist (nothing has been scraped
+    yet, or the bucket predates the manifest index).
+
+    The full object is fetched (no range-request pushdown on a ``BytesIO``
+    read), but ``columns=`` and ``filters=`` are applied during decode so only
+    the projected columns of matching rows are decompressed and materialised.
+    """
+    body = load_content(f"s3://{bucket}/{_MANIFEST_PARQUET_KEY}")
+    if not body:
+        return None
+    return pd.read_parquet(
+        io.BytesIO(body),
+        columns=_MANIFEST_QUERY_COLUMNS,
+        filters=filters,
+    )
+
+
 def iter_filings_by_form_type(
     form_types: str | list[str],
     start_date: date,
     end_date: date,
     *,
     bucket: str = "",
-    include_failures: bool = False,
+    search_by: str = _SEARCH_BY_FILING_DATE,
 ) -> Iterator[ScrapedFiling]:
-    """Yield scraped filing manifests from S3 matching form type and date range.
+    """Yield scraped filing manifests matching form type and a date range.
 
-    Lists ``manifest.json`` objects under ``{form_type}/{YYYY-MM-DD}/`` prefixes
-    and yields deserialised ``ScrapedFiling`` instances. By default filings with
-    a non-empty ``failure_reason`` are skipped; pass ``include_failures=True`` to
-    include them.
+    Served from the bucket-level ``manifest.parquet`` query index rather than by
+    scanning S3 prefixes: the parquet is filtered to rows matching ``form_types``
+    within the date range, then the ``manifest.json`` for each distinct filing is
+    fetched and deserialised into a full :class:`ScrapedFiling`.
+
+    ``search_by`` selects the date the range applies to:
+
+    * ``"filing_date"`` (default) — the date the filing was submitted to SEC.
+    * ``"scraped_date"`` — the date each document was pulled down to S3 (the
+      per-document ``date_scraped``). A filing is returned if *any* of its
+      documents was scraped within the range; callers that need only the
+      documents scraped in-range must filter each returned filing themselves.
+
+    Every filing that has at least one matching document is returned. Because the
+    parquet indexes only successfully-scraped documents, failed and empty filings
+    are never returned (there is no ``include_failures`` option on this path).
 
     Args:
         form_types: One form type string or a list of form type strings
@@ -260,17 +348,21 @@ def iter_filings_by_form_type(
         end_date: Last date to include (inclusive).
         bucket: S3 bucket name. Falls back to the ``BUCKET_NAME`` environment
             variable when omitted.
-        include_failures: When ``True``, also yield filings whose
-            ``failure_reason`` is non-empty.
+        search_by: ``"filing_date"`` or ``"scraped_date"`` — which date the
+            range filters on.
 
     Yields:
         Deserialised ``ScrapedFiling`` instances.
 
     Raises:
-        ValueError: If ``start_date`` is after ``end_date`` or no bucket is set.
+        ValueError: If ``start_date`` is after ``end_date``, no bucket is set, or
+            ``search_by`` is not a recognised mode.
     """
     if start_date > end_date:
         raise ValueError(f"start_date {start_date} is after end_date {end_date}")
+
+    if search_by not in _SEARCH_MODES:
+        raise ValueError(f"search_by must be one of {_SEARCH_MODES}, got {search_by!r}.")
 
     resolved_bucket = bucket or os.environ.get("BUCKET_NAME", "")
     if not resolved_bucket:
@@ -278,9 +370,41 @@ def iter_filings_by_form_type(
             "A bucket name is required. Pass bucket= or set the BUCKET_NAME environment variable."
         )
 
-    return _iter_filings_by_form_type(
-        form_types, start_date, end_date, resolved_bucket, include_failures
-    )
+    return _iter_filings_by_form_type(form_types, start_date, end_date, resolved_bucket, search_by)
+
+
+def _matching_manifest_rows(
+    df: pd.DataFrame,
+    form_types: list[str],
+    start_date: date,
+    end_date: date,
+    search_by: str,
+) -> pd.DataFrame:
+    """Return distinct filing keys for documents matching the query.
+
+    A key is ``(form_type, filing_date, cik, accession_number)``; a document
+    matches when its ``form_type`` is in ``form_types`` and its date (per
+    ``search_by``) falls within ``[start_date, end_date]``.
+    """
+    mask = df["form_type"].isin(form_types)
+
+    if search_by == _SEARCH_BY_SCRAPED_DATE:
+        # date_scraped is a tz-aware UTC timestamp column; NaT rows (pre-migration
+        # or unscraped) never satisfy the comparison and so drop out.
+        scraped = df["date_scraped"]
+        if not isinstance(scraped.dtype, pd.DatetimeTZDtype):
+            scraped = pd.to_datetime(scraped, utc=True, errors="coerce")
+        lower = pd.Timestamp(start_date, tz="UTC")
+        upper = pd.Timestamp(end_date, tz="UTC") + pd.Timedelta(days=1)
+        mask &= (scraped >= lower) & (scraped < upper)
+    else:
+        filed = pd.to_datetime(df["filing_date"], errors="coerce")
+        lower = pd.Timestamp(start_date)
+        upper = pd.Timestamp(end_date) + pd.Timedelta(days=1)
+        mask &= (filed >= lower) & (filed < upper)
+
+    keys = ["form_type", "filing_date", "cik", "accession_number"]
+    return df.loc[mask, keys].drop_duplicates().sort_values(keys)
 
 
 def _iter_filings_by_form_type(
@@ -288,29 +412,28 @@ def _iter_filings_by_form_type(
     start_date: date,
     end_date: date,
     bucket: str,
-    include_failures: bool,
+    search_by: str,
 ) -> Iterator[ScrapedFiling]:
     if isinstance(form_types, str):
         form_types = [form_types]
 
-    paginator = _get_s3_client().get_paginator("list_objects_v2")
-    current = start_date
-    while current <= end_date:
-        for form_type in form_types:
-            form_type_safe = _SAFE_RE.sub("_", form_type)
-            prefix = f"{_S3_ROOT}/{current.isoformat()}/{form_type_safe}/"
-            for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
-                for obj in page.get("Contents", []):
-                    key: str = obj["Key"]
-                    if not key.endswith("/manifest.json"):
-                        continue
-                    filing = _load_filing(bucket, key)
-                    if filing is None:
-                        continue
-                    if not include_failures and filing.failure_reason:
-                        continue
-                    yield filing
-        current += timedelta(days=1)
+    filters = _manifest_read_filters(form_types, start_date, end_date, search_by)
+    df = _read_manifest_parquet(bucket, filters=filters)
+    if df is None or df.empty:
+        return
+
+    for row in _matching_manifest_rows(df, form_types, start_date, end_date, search_by).itertuples(
+        index=False
+    ):
+        key = _manifest_key(
+            row.form_type,
+            date.fromisoformat(str(row.filing_date)),
+            str(row.cik),
+            str(row.accession_number),
+        )
+        filing = _load_filing(bucket, key)
+        if filing is not None:
+            yield filing
 
 
 def iter_filings_by_discovered(
