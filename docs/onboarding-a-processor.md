@@ -107,6 +107,11 @@ Required on **both** rulesets (PRs into `dev` and into `main`):
 - ✅ Block force pushes
 - Deploy key on the **bypass** list, set to "Always allow" (see §3) — **required on `dev`**: the `sync-dev` job direct-pushes the `main`→`dev` merge-back with no PR, and branch protection's "require a pull request before merging" otherwise rejects it. (Deploy keys are not subject to "restrict who can push", but they *are* blocked by the PR requirement.)
 
+Also enable **Settings → General → Automatically delete head branches** so merged
+issue branches are cleaned up instead of accumulating in the repo. This only
+deletes the head branch of a merged PR; `dev` and `main` are unaffected, and
+"Restrict deletions" on those rulesets still applies.
+
 ---
 
 ## 3. Deploy key setup
