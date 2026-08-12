@@ -250,7 +250,7 @@ class SecClient(ApiClient):
         self._sec_headers = {"User-Agent": resolved}
 
     @property
-    def sec_headers(self) -> dict:
+    def sec_headers(self) -> dict[str, str]:
         """Return the SEC header for querying."""
         return self._sec_headers
 
