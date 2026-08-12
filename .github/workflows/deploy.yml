@@ -172,7 +172,10 @@ jobs:
           name: dist
           path: dist/
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b  # release/v1
+        # Keep reasonably current: this action bundles twine, and a stale pin
+        # rejects wheels whose Metadata-Version is newer than its packaging
+        # knows about (v0.1.17 failed this way once hatchling emitted 2.5).
+        uses: pypa/gh-action-pypi-publish@a892a5a61159132606e93a2fa6f4358831b04d26  # v1.14.2
 
   upload-release-assets:
     name: Upload artifacts to GitHub Release
