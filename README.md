@@ -6,7 +6,7 @@ Shared AWS infrastructure for the FTM2J terminal ecosystem. Two independent Pulu
 
 ## `pulumi-bootstrap` — GitHub Actions OIDC
 
-Provisions the account-level OIDC identity provider and the two IAM roles that all `dsi-clinic` repos use to authenticate with AWS from GitHub Actions.
+Provisions the account-level OIDC identity provider and the two IAM roles that all `dsi-rse` repos use to authenticate with AWS from GitHub Actions.
 
 > **Run locally.** This stack must be deployed from a workstation with AWS credentials — it creates the very roles that CI uses, so CI cannot deploy it itself.
 
@@ -26,7 +26,7 @@ pulumi up
 | `deploy` | Pushes to `main`, `dev`, `release/**` | Full deploy (`pulumi up`) |
 
 Each repository gets its **own** `checks` + `deploy` role pair, trust-scoped to
-`repo:dsi-clinic/<repo>` so a repo's workflows can assume only its own roles. The
+`repo:dsi-rse/<repo>` so a repo's workflows can assume only its own roles. The
 stack loops over the `idi:repos` list (defaulted in
 [`infra/config.py`](pulumi-bootstrap/infra/config.py)); **to onboard a new repo,
 add its name to that list and re-deploy this stack**, then read its ARNs from the

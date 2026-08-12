@@ -14,7 +14,7 @@ ecosystem. It has two distinct parts in one repo:
    to PyPI as `idi-ftm2j-shared`.
 2. **Pulumi infrastructure** — two independent programs:
    - [`pulumi-bootstrap/`](pulumi-bootstrap): account-level GitHub OIDC provider and
-     the `checks`/`deploy` IAM roles all `dsi-clinic` repos assume from CI. Deployed
+     the `checks`/`deploy` IAM roles all `dsi-rse` repos assume from CI. Deployed
      **manually from a workstation** (it creates the roles CI itself uses).
    - [`pulumi-shared/`](pulumi-shared): shared AWS resources (S3 bucket, S3 VPC
      gateway endpoint, SQS dead-letter queue) that downstream processor stacks
