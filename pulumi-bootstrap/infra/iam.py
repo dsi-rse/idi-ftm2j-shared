@@ -547,14 +547,21 @@ def _repo_roles(repo: str) -> tuple[aws.iam.Role, aws.iam.Role]:
         ``(checks_role, deploy_role)`` for *repo*.
     """
     prefix = f"{repo}-{config.stack_name}-github"
-    repo_prefix = f"repo:{config.github_org}/{repo}"
+    # Since the org rename GitHub embeds immutable IDs in the OIDC sub
+    # (repo:org@id/repo@id:...), so match both the plain and ID-suffixed forms.
+    # `@` is not a legal org/repo name character, so `@*` cannot be spoofed by
+    # a look-alike name.
+    repo_prefixes = [
+        f"repo:{config.github_org}/{repo}",
+        f"repo:{config.github_org}@*/{repo}@*",
+    ]
 
     checks_role = aws.iam.Role(
         f"idi-role-github-checks-{repo}",
         name=f"{prefix}-checks",
         description=f"Read-only access for pulumi preview on {repo} pull requests",
         assume_role_policy=_trust_policy(
-            [f"{repo_prefix}:{sub}" for sub in config.checks_sub_conditions]
+            [f"{p}:{sub}" for p in repo_prefixes for sub in config.checks_sub_conditions]
         ),
         tags=config.tags({"Name": f"{prefix}-checks", "repo": repo}),
     )
@@ -569,7 +576,7 @@ def _repo_roles(repo: str) -> tuple[aws.iam.Role, aws.iam.Role]:
         name=f"{prefix}-deploy",
         description=f"Full deploy access for pulumi up on {repo} ({config.stack_name})",
         assume_role_policy=_trust_policy(
-            [f"{repo_prefix}:{sub}" for sub in config.deploy_sub_conditions]
+            [f"{p}:{sub}" for p in repo_prefixes for sub in config.deploy_sub_conditions]
         ),
         tags=config.tags({"Name": f"{prefix}-deploy", "repo": repo}),
     )
