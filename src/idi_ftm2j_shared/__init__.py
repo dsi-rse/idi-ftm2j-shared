@@ -1,4 +1,4 @@
-"""Shared utilities for FTM2J pipeline processors.
+"""Shared runtime utilities for FTM2J pipeline processors.
 
 The installed package version is available as ``__version__`` or via
 ``get_version()``.
