@@ -9,7 +9,7 @@ config:
 
   idi:github_org:
     description: GitHub organization name
-    value: "dsi-clinic"
+    value: "dsi-rse"
 
   idi:app_name:
     description: Name of the application

@@ -26,8 +26,8 @@ dependencies = [
 ]
 
 [project.urls]
-Repository = "https://github.com/dsi-clinic/idi-ftm2j-shared"
-Issues = "https://github.com/dsi-clinic/idi-ftm2j-shared/issues"
+Repository = "https://github.com/dsi-rse/idi-ftm2j-shared"
+Issues = "https://github.com/dsi-rse/idi-ftm2j-shared/issues"
 
 [dependency-groups]
 deploy = [

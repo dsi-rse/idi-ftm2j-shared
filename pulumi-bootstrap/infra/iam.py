@@ -29,7 +29,7 @@ def _trust_policy(sub_conditions: list[str]) -> pulumi.Output:
     """Build a GitHub Actions OIDC assume-role trust policy.
 
     Uses ``StringLike`` so ``sub_conditions`` may mix exact repo prefixes with
-    wildcard ref patterns (e.g. ``repo:dsi-clinic/idi-sec-scraper:ref:refs/heads/*``).
+    wildcard ref patterns (e.g. ``repo:dsi-rse/idi-sec-scraper:ref:refs/heads/*``).
 
     Args:
         sub_conditions: One or more ``token.actions.githubusercontent.com:sub``
