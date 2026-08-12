@@ -6,7 +6,7 @@ Copy-down checklist for putting a **processor** repo (e.g. `idi-corporate-struct
 [`pipeline-checks.yml`](../.github/workflows/pipeline-checks.yml).
 
 Scope: **processors only.** This repo's own PyPI flow (`deploy.yml`, which is
-self-contained and not shared) is out of scope. Org is assumed to be `dsi-clinic`; adjust `gh`
+self-contained and not shared) is out of scope. Org is assumed to be `dsi-rse`; adjust `gh`
 commands to your auth/admin scope.
 
 Work top to bottom. A repo is fully onboarded when a `dev` push releases + pushes
@@ -40,7 +40,7 @@ permissions:           # caller must grant the union the nested jobs request
   packages: write      # push images to GHCR
 jobs:
   pipeline:
-    uses: dsi-clinic/idi-ftm2j-shared/.github/workflows/pipeline-docker.yml@vX.Y.Z  # pin an exact release
+    uses: dsi-rse/idi-ftm2j-shared/.github/workflows/pipeline-docker.yml@vX.Y.Z  # pin an exact release
     secrets: inherit
     with:
       app-name: <app-name>  # e.g. corporate-structure
@@ -65,7 +65,7 @@ permissions:
   security-events: write   # CodeQL upload
 jobs:
   checks:
-    uses: dsi-clinic/idi-ftm2j-shared/.github/workflows/pipeline-checks.yml@vX.Y.Z  # pin an exact release
+    uses: dsi-rse/idi-ftm2j-shared/.github/workflows/pipeline-checks.yml@vX.Y.Z  # pin an exact release
     secrets: inherit
     with:
       app-name: <app-name>  # e.g. corporate-structure
@@ -130,7 +130,7 @@ ssh-keygen -t ed25519 -C "deploy key for <repo>" -f ~/.ssh/<repo>_deploy_key -N 
 #    (repo Settings → Deploy keys → Add deploy key → check "Allow write access")
 
 # 3. Store the PRIVATE key as the DEPLOY_KEY repo secret
-gh secret set DEPLOY_KEY --repo "dsi-clinic/<repo>" < ~/.ssh/<repo>_deploy_key
+gh secret set DEPLOY_KEY --repo "dsi-rse/<repo>" < ~/.ssh/<repo>_deploy_key
 ```
 
 Then add the deploy key to `dev` branch ruleset's branch-protection bypass list in the repository settings: `Add bypass` > `Deploy keys` (§2).
@@ -143,7 +143,7 @@ Add the deploy key to the Bitwarden account, following the naming convention use
 
 Each repo assumes its **own** AWS roles — there is no shared org-wide role. The
 `pulumi-bootstrap` stack loops over a repo list and creates a `checks` + `deploy`
-role pair per repo, trust-scoped to `repo:dsi-clinic/<repo>` so only that repo's
+role pair per repo, trust-scoped to `repo:dsi-rse/<repo>` so only that repo's
 workflows can assume them.
 
 1. Add the repo to the `repos` list in
@@ -220,7 +220,7 @@ dark until its AWS infra exists.
 
 1. Set `PROD_INFRA_READY=false` (the safe default) when onboarding:
    ```bash
-   gh variable set PROD_INFRA_READY --repo "dsi-clinic/<repo>" --body "false"
+   gh variable set PROD_INFRA_READY --repo "dsi-rse/<repo>" --body "false"
    ```
    A `main` push still **versions, releases, and pushes the image to GHCR**, but
    `deploy-pulumi` (and the ECR sync) is **skipped**. Dev is unaffected — it always
@@ -231,7 +231,7 @@ dark until its AWS infra exists.
    then do a `dev`→`main` PR and confirm the stable release and `sync-dev` merge-back.
 4. Once the prod AWS stack is provisioned and verified, flip the gate:
    ```bash
-   gh variable set PROD_INFRA_READY --repo "dsi-clinic/<repo>" --body "true"
+   gh variable set PROD_INFRA_READY --repo "dsi-rse/<repo>" --body "true"
    ```
    From then on `main` pushes also sync to ECR and run `deploy-pulumi` against prod
    (still behind the `prod` environment's approval gate).
