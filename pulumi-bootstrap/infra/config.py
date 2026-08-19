@@ -46,6 +46,7 @@ repos: list[str] = config.get_object("repos") or [
     "idi-corporate-structure",
     "idi-company-info",
     "idi-sec-scraper",
+    "commercial-debt-tracker",
 ]
 
 # Trust-policy sub conditions, derived PER STACK so each env's roles trust only
