@@ -105,7 +105,7 @@ jobs:
       - name: Install dependencies
         run: uv sync ${{ inputs.sync-args }}
       - name: Upgrade pip to patched version
-        run: uv pip install "pip>=26.1.2"
+        run: uv pip install "pip>=26.2"
       - name: Dependency vulnerability scan (pip-audit)
         run: uv run --with pip-audit pip-audit --desc --ignore-vuln CVE-2026-3219  # Pip vulnerability, no current fix
       - name: CodeQL Analysis Init
