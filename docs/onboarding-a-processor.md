@@ -54,7 +54,6 @@ name: Checks
 on:
   pull_request:
     branches: [main, dev]
-    paths-ignore: ['**.md', 'docs/**']
   workflow_dispatch:
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
