@@ -46,6 +46,7 @@ repos: list[str] = config.get_object("repos") or [
     "idi-corporate-structure",
     "idi-company-info",
     "idi-sec-scraper",
+    "idi-company-facts",
     "commercial-debt-tracker",
     "idi-company-facts",
 ]

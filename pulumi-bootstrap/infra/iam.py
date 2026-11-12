@@ -196,6 +196,32 @@ _CHECKS_POLICY_DOC = json.dumps(
                 "Resource": "*",
             },
             {
+                "Sid": "CloudWatchAlarmRead",
+                "Effect": "Allow",
+                "Action": [
+                    "cloudwatch:DescribeAlarms",
+                    "cloudwatch:ListTagsForResource",
+                ],
+                "Resource": "arn:aws:cloudwatch:*:059007901663:alarm:idi-*",
+            },
+            {
+                "Sid": "SNSRead",
+                "Effect": "Allow",
+                "Action": [
+                    "sns:GetTopicAttributes",
+                    "sns:GetSubscriptionAttributes",
+                    "sns:ListSubscriptionsByTopic",
+                    "sns:ListTagsForResource",
+                ],
+                "Resource": "arn:aws:sns:*:059007901663:idi-*",
+            },
+            {
+                "Sid": "LogsMetricFilterRead",
+                "Effect": "Allow",
+                "Action": ["logs:DescribeMetricFilters"],
+                "Resource": "arn:aws:logs:*:059007901663:log-group:/ecs/idi-*",
+            },
+            {
                 "Sid": "STSCallerIdentity",
                 "Effect": "Allow",
                 "Action": "sts:GetCallerIdentity",
@@ -477,6 +503,11 @@ _DEPLOY_POLICY_DOC = json.dumps(
                     "logs:UntagResource",
                     "logs:ListTagsForResource",
                     "logs:ListTagsLogGroup",
+                    # Processors alert on log-derived liveness metrics (e.g. CDT's
+                    # poll-tick filter); filters live on the log group.
+                    "logs:PutMetricFilter",
+                    "logs:DeleteMetricFilter",
+                    "logs:DescribeMetricFilters",
                 ],
                 "Resource": "arn:aws:logs:*:059007901663:log-group:/ecs/idi-*",
             },
@@ -485,6 +516,40 @@ _DEPLOY_POLICY_DOC = json.dumps(
                 "Effect": "Allow",
                 "Action": ["logs:DescribeLogGroups"],
                 "Resource": "*",
+            },
+            {
+                # Liveness alarms on the log-derived metrics above.
+                "Sid": "CloudWatchAlarms",
+                "Effect": "Allow",
+                "Action": [
+                    "cloudwatch:PutMetricAlarm",
+                    "cloudwatch:DeleteAlarms",
+                    "cloudwatch:DescribeAlarms",
+                    "cloudwatch:TagResource",
+                    "cloudwatch:UntagResource",
+                    "cloudwatch:ListTagsForResource",
+                ],
+                "Resource": "arn:aws:cloudwatch:*:059007901663:alarm:idi-*",
+            },
+            {
+                # Alarm notification topics. Subscription ARNs extend the topic
+                # ARN (idi-*:uuid), so one prefix covers both.
+                "Sid": "SNSAlerts",
+                "Effect": "Allow",
+                "Action": [
+                    "sns:CreateTopic",
+                    "sns:DeleteTopic",
+                    "sns:GetTopicAttributes",
+                    "sns:SetTopicAttributes",
+                    "sns:Subscribe",
+                    "sns:Unsubscribe",
+                    "sns:GetSubscriptionAttributes",
+                    "sns:ListSubscriptionsByTopic",
+                    "sns:TagResource",
+                    "sns:UntagResource",
+                    "sns:ListTagsForResource",
+                ],
+                "Resource": "arn:aws:sns:*:059007901663:idi-*",
             },
             {
                 "Sid": "ECSFull",
