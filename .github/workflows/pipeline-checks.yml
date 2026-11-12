@@ -137,6 +137,12 @@ jobs:
       - name: Install dependencies
         run: uv sync --group pulumi
         working-directory: ${{ inputs.project-dir }}
+      - name: Setup Pulumi CLI
+        # The ubuntu runner image no longer preinstalls the CLI; `uv sync` only
+        # installs the Python SDK. No `command:` input, so this only installs.
+        uses: pulumi/actions@96c7761824268174e0d2a4e8c7d75671eebd24a7  # v7.1.0
+        with:
+          pulumi-version: "3.248.0"
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
